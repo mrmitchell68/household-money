@@ -1,8 +1,8 @@
 /* Household Money service worker.
-   cache-bust: hm-v1.1.0
+   cache-bust: hm-v1.2.0
    A service worker cannot network-first its own script. Bump VERSION to refresh the shell.
    The page posts "skipWaiting" so an update takes control. This file is not put in the cache. */
-const VERSION = "hm-v1.1.0";
+const VERSION = "hm-v1.2.0";
 const SHELL_CACHE = VERSION + "-shell";
 const SHELL = [
   "./",
@@ -11,7 +11,14 @@ const SHELL = [
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/icon-maskable-512.png",
-  "./icons/apple-touch-icon.png"
+  "./icons/apple-touch-icon.png",
+  "./vendor/tesseract/tesseract.min.js",
+  "./vendor/tesseract/worker.min.js",
+  "./vendor/tesseract/tesseract-core.wasm.js",
+  "./vendor/tesseract/tesseract-core-simd.wasm.js",
+  "./vendor/tesseract/tesseract-core-lstm.wasm.js",
+  "./vendor/tesseract/tesseract-core-simd-lstm.wasm.js",
+  "./vendor/tessdata/eng.traineddata.gz"
 ];
 
 self.addEventListener("install", (event) => {

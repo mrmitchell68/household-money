@@ -36,6 +36,7 @@ def main():
     assert "new income and spending are also added to the shared Google Sheet, under the category you picked" in html
     assert "the sheet stores the receipt file name" in html
     assert "sent when you open the app online again" in html
+    assert "this phone remembers which category you used for that store" in html
     tiny_png(PNG)
 
     with sync_playwright() as p:
@@ -190,6 +191,29 @@ def main():
         assert logic["zero"] == "$0.00"
         assert logic["bad"] is None
         assert logic["ok"] == 10000
+
+        guess = page.evaluate("""() => {
+          const nl = String.fromCharCode(10);
+          return {
+            kind: typeof HM.guessCategory,
+            walmart: HM.guessCategory('WALMART SUPERCENTER' + nl + 'TOTAL 12.34', HM.DEFAULT_CATEGORIES, {}),
+            unknown: HM.guessCategory('mystery booth downtown', HM.DEFAULT_CATEGORIES, {}),
+            learned: HM.guessCategory('WALMART', HM.DEFAULT_CATEGORIES, {walmart: 'Groceries'}),
+            missing: HM.guessCategory('WALMART', ['Groceries'], {}),
+            total: HM.extractAmount('SUBTOTAL 10.00' + nl + 'TAX 0.80' + nl + 'TOTAL 10.80'),
+            due: HM.extractAmount('AMOUNT DUE $8.50'),
+            balance: HM.extractAmount('SUBTOTAL 4.00' + nl + 'BALANCE 4.25')
+          };
+        }""")
+        print("GUESS", guess)
+        assert guess["kind"] == "function"
+        assert guess["walmart"] == "Online"
+        assert guess["unknown"] is None
+        assert guess["learned"] == "Groceries"
+        assert guess["missing"] is None
+        assert guess["total"] == "10.80"
+        assert guess["due"] == "8.50"
+        assert guess["balance"] == "4.25"
         browser.close()
     print("PASS")
 

@@ -332,6 +332,7 @@
           <img id="photo-preview" alt="Receipt preview">
           <p id="photo-filename"></p>
         </div>
+        <p class="hint" id="receipt-hint" hidden></p>
         <p class="error" id="spend-error" role="alert"></p>
         <button class="btn btn-primary btn-block" id="spend-save" type="submit">Save</button>
       </form>
@@ -373,6 +374,7 @@
       </ol>
       <h3>Backup</h3>
       <p>Entries live on this phone. When the phone is online, new income and spending are also added to the shared Google Sheet, under the category you picked. Photos stay on the phone; the sheet stores the receipt file name. If the phone is offline, the entry is saved here and sent when you open the app online again. Export a backup if you want a file of what is saved here. Import merges by entry id and does not duplicate entries already on this phone.</p>
+      <p>A receipt photo can fill in the amount and store, and this phone remembers which category you used for that store.</p>
       <button class="btn btn-primary btn-block" id="export-backup" type="button">Export backup</button>
       <label class="btn btn-block" for="import-file" style="display:flex;align-items:center;justify-content:center;margin-top:8px;">Import backup</label>
       <input class="file-input" id="import-file" type="file" accept="application/json,.json" aria-label="Import backup file">
@@ -400,6 +402,7 @@
   var KEY_ENTRIES = "householdMoney.entries.v1";
   var KEY_CATS = "householdMoney.categories.v1";
   var KEY_SYNC_QUEUE = "hm.syncQueue";
+  var KEY_LEARNED = "hm.learned.v1";
   var SYNC_QUEUE_CAP = 50;
   var DB_NAME = "household-money";
   var DB_STORE = "photos";
@@ -408,6 +411,8 @@
   var entries = [];
   var categories = [];
   var spendPhoto = null;
+  var photoToken = 0;
+  var ocrWorkerPromise = null;
   var viewingPhotoId = null;
   var fullUrl = null;
   var thumbUrls = [];
@@ -520,6 +525,312 @@
       if (categories[i].toLowerCase() === key) return categories[i];
     }
     return "";
+  }
+
+  var STARTER_MAP = [
+    ["walmart", "Online"],
+    ["amazon", "Online"],
+    ["ebay", "Online"],
+    ["facebook marketplace", "Online"],
+    ["kroger", "Groceries"],
+    ["food lion", "Groceries"],
+    ["aldi", "Groceries"],
+    ["publix", "Groceries"],
+    ["ingles", "Groceries"],
+    ["harris teeter", "Groceries"],
+    ["water", "Utilities"],
+    ["electric", "Utilities"],
+    ["utility", "Utilities"],
+    ["duke energy", "Utilities"],
+    ["cvs", "Medical"],
+    ["walgreens", "Medical"],
+    ["pharmacy", "Medical"],
+    ["verizon", "Phones"],
+    ["t mobile", "Phones"],
+    ["at t", "Phones"],
+    ["att", "Phones"],
+    ["mortgage", "Mortgage"],
+    ["tithe", "Tithes"],
+    ["church", "Tithes"]
+  ];
+
+  function normalizeLearnedKey(text) {
+    return String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  function hasPhrase(hay, phrase) {
+    if (!phrase) return false;
+    return (" " + hay + " ").indexOf(" " + phrase + " ") !== -1;
+  }
+
+  function categoryByName(name, list) {
+    var key = String(name || "").toLowerCase();
+    var cats = list || [];
+    for (var i = 0; i < cats.length; i++) {
+      if (String(cats[i]).toLowerCase() === key) return cats[i];
+    }
+    return "";
+  }
+
+  function guessCategory(text, categories, learned) {
+    var hay = normalizeLearnedKey(text);
+    if (!hay) return null;
+    var cats = Array.isArray(categories) ? categories : [];
+    var map = learned && typeof learned === "object" && !Array.isArray(learned) ? learned : null;
+    if (map) {
+      var keys = Object.keys(map);
+      keys.sort(function (a, b) { return b.length - a.length; });
+      for (var i = 0; i < keys.length; i++) {
+        var rawKey = keys[i];
+        var key = normalizeLearnedKey(rawKey);
+        if (key.length < 3) continue;
+        if (!hasPhrase(hay, key)) continue;
+        var hit = categoryByName(map[rawKey], cats);
+        if (hit) return hit;
+      }
+    }
+    for (var j = 0; j < STARTER_MAP.length; j++) {
+      var cat = categoryByName(STARTER_MAP[j][1], cats);
+      if (!cat) continue;
+      if (hasPhrase(hay, STARTER_MAP[j][0])) return cat;
+    }
+    return null;
+  }
+
+  function loadLearned() {
+    try {
+      var obj = JSON.parse(localStorage.getItem(KEY_LEARNED) || "{}");
+      if (!obj || typeof obj !== "object" || Array.isArray(obj)) return {};
+      return obj;
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveLearned(map) {
+    localStorage.setItem(KEY_LEARNED, JSON.stringify(map));
+  }
+
+  function seedLearned() {
+    var learned = loadLearned();
+    var changed = false;
+    STARTER_MAP.forEach(function (pair) {
+      var cat = categoryByName(pair[1], categories);
+      if (!cat) return;
+      if (!Object.prototype.hasOwnProperty.call(learned, pair[0])) {
+        learned[pair[0]] = cat;
+        changed = true;
+      }
+    });
+    if (changed) {
+      try { saveLearned(learned); } catch (e) {}
+    }
+  }
+
+  function rememberLearned(text, category) {
+    var key = normalizeLearnedKey(text);
+    if (key.length < 3 || !category) return;
+    var learned = loadLearned();
+    learned[key] = category;
+    saveLearned(learned);
+  }
+
+  function rememberSpend(note, category, merchant) {
+    try {
+      rememberLearned(note, category);
+      if (merchant) rememberLearned(merchant, category);
+      var blob = normalizeLearnedKey(String(merchant || "") + " " + String(note || ""));
+      STARTER_MAP.forEach(function (pair) {
+        if (hasPhrase(blob, pair[0])) rememberLearned(pair[0], category);
+      });
+    } catch (e) {}
+  }
+
+  function moneyOnLine(line) {
+    var s = String(line || "").replace(/,/g, "");
+    var matches = s.match(/\$?\d+\.\d{2}/g);
+    if (!matches) return "";
+    var raw = matches[matches.length - 1].replace(/\$/g, "");
+    var n = Number(raw);
+    if (!isFinite(n) || n <= 0 || n > 9999999.99) return "";
+    return n.toFixed(2);
+  }
+
+  function extractAmount(text) {
+    var lines = String(text || "").split(/\r?\n/);
+    var labeled = "";
+    var fallback = "";
+    for (var i = 0; i < lines.length; i++) {
+      var raw = lines[i];
+      var upper = raw.toUpperCase();
+      var money = moneyOnLine(raw);
+      if (!money) continue;
+      var sub = /\bSUB[\s-]*TOTAL\b/.test(upper);
+      var taxOnly = /\bTAX\b/.test(upper) && !/\bTOTAL\b/.test(upper);
+      var total = /\bTOTAL\b/.test(upper) && !sub;
+      var due = /AMOUNT\s+DUE/.test(upper);
+      var balance = /\bBALANCE\b/.test(upper);
+      if (total || due || balance) labeled = money;
+      else if (!sub && !taxOnly) fallback = money;
+    }
+    return labeled || fallback || "";
+  }
+
+  function validYMD(y, m, d) {
+    var yy = Number(y);
+    var mm = Number(m);
+    var dd = Number(d);
+    if (!isFinite(yy) || !isFinite(mm) || !isFinite(dd)) return "";
+    if (yy < 2000 || yy > 2100 || mm < 1 || mm > 12 || dd < 1 || dd > 31) return "";
+    var dt = new Date(yy, mm - 1, dd);
+    if (dt.getFullYear() !== yy || dt.getMonth() !== mm - 1 || dt.getDate() !== dd) return "";
+    return yy + "-" + pad(mm) + "-" + pad(dd);
+  }
+
+  function extractDate(text) {
+    var t = String(text || "");
+    var iso = t.match(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
+    if (iso) return validYMD(iso[1], iso[2], iso[3]);
+    var us = t.match(/\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b/);
+    if (!us) return "";
+    var year = us[3];
+    if (year.length === 2) {
+      var yy = Number(year);
+      year = String(yy >= 70 ? 1900 + yy : 2000 + yy);
+    }
+    return validYMD(year, us[1], us[2]);
+  }
+
+  function extractMerchant(text) {
+    var lines = String(text || "").split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].replace(/\s+/g, " ").trim();
+      if (line.length < 3 || line.length > 48) continue;
+      var letters = line.replace(/[^A-Za-z]/g, "");
+      if (letters.length < 3) continue;
+      if (/https?:|www\./i.test(line)) continue;
+      if (/\d{3}[-.\s]\d{3}[-.\s]\d{4}/.test(line)) continue;
+      if (/^(receipt|thank you|thanks|welcome|customer copy|store copy|sale|cashier|tel|phone|date|time|invoice|order|transaction|visa|mastercard|debit|credit|auth|approved|item|qty|cash|member|rewards|survey)\b/i.test(line)) continue;
+      if (/\b(sub[\s-]*total|total|tax|amount due|balance)\b/i.test(line)) continue;
+      return line;
+    }
+    return "";
+  }
+
+  function setReceiptHint(msg) {
+    var el = document.getElementById("receipt-hint");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.hidden = !msg;
+  }
+
+  function spendFormOpen() {
+    var view = document.getElementById("view-spend");
+    return !!(view && !view.hidden);
+  }
+
+  function checkCategory(name) {
+    var inputs = document.querySelectorAll('#cat-chips input[name="category"]');
+    for (var i = 0; i < inputs.length; i++) {
+      if (inputs[i].value === name) {
+        inputs[i].checked = true;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function applyReceiptText(text) {
+    var cleaned = String(text || "").replace(/\u0000/g, "").trim();
+    if (cleaned.replace(/[^A-Za-z]/g, "").length < 3) {
+      setReceiptHint("Couldn't read that photo. Fill this in yourself.");
+      return;
+    }
+    var amountEl = document.getElementById("spend-amount");
+    var noteEl = document.getElementById("spend-note");
+    var dateEl = document.getElementById("spend-date");
+    if (!String(amountEl.value || "").trim()) {
+      var amt = extractAmount(cleaned);
+      if (amt) amountEl.value = amt;
+    }
+    var merchant = extractMerchant(cleaned);
+    if (merchant && spendPhoto) spendPhoto.merchant = merchant;
+    if (!String(noteEl.value || "").trim() && merchant) noteEl.value = merchant.slice(0, 200);
+    var today = todayYMD();
+    if (!dateEl.value || dateEl.value === today) {
+      var found = extractDate(cleaned);
+      if (found) dateEl.value = found;
+    }
+    var picked = document.querySelector('#cat-chips input[name="category"]:checked');
+    var guess = guessCategory(cleaned, categories, loadLearned());
+    if (guess) {
+      if (!picked) checkCategory(guess);
+      setReceiptHint("This looks like " + guess + ". Change it if that's wrong.");
+    } else if (!picked) {
+      setReceiptHint("Which category is this?");
+    } else {
+      setReceiptHint("");
+    }
+  }
+
+  function assetUrl(path) {
+    return new URL(path, location.href).href;
+  }
+
+  function loadTesseractScript() {
+    if (window.Tesseract && window.Tesseract.createWorker) return Promise.resolve(window.Tesseract);
+    if (loadTesseractScript.pending) return loadTesseractScript.pending;
+    loadTesseractScript.pending = new Promise(function (resolve, reject) {
+      var script = document.createElement("script");
+      script.src = "vendor/tesseract/tesseract.min.js";
+      script.async = true;
+      script.onload = function () {
+        if (window.Tesseract && window.Tesseract.createWorker) resolve(window.Tesseract);
+        else reject(new Error("Tesseract missing"));
+      };
+      script.onerror = function () { reject(new Error("Tesseract script failed")); };
+      document.head.appendChild(script);
+    }).catch(function (err) {
+      loadTesseractScript.pending = null;
+      throw err;
+    });
+    return loadTesseractScript.pending;
+  }
+
+  function getOcrWorker() {
+    if (ocrWorkerPromise) return ocrWorkerPromise;
+    ocrWorkerPromise = loadTesseractScript().then(function (Tesseract) {
+      var core = assetUrl("vendor/tesseract/");
+      if (core.charAt(core.length - 1) === "/") core = core.slice(0, -1);
+      var lang = assetUrl("vendor/tessdata");
+      if (lang.charAt(lang.length - 1) === "/") lang = lang.slice(0, -1);
+      return Tesseract.createWorker("eng", 1, {
+        workerPath: assetUrl("vendor/tesseract/worker.min.js"),
+        corePath: core,
+        langPath: lang,
+        workerBlobURL: false,
+        gzip: true,
+        errorHandler: function () {}
+      });
+    }).catch(function (err) {
+      ocrWorkerPromise = null;
+      throw err;
+    });
+    return ocrWorkerPromise;
+  }
+
+  function readReceipt(image, token) {
+    setReceiptHint("Reading the receipt…");
+    getOcrWorker().then(function (worker) {
+      return worker.recognize(image);
+    }).then(function (result) {
+      if (token !== photoToken || !spendFormOpen()) return;
+      var text = result && result.data && result.data.text ? result.data.text : "";
+      applyReceiptText(text);
+    }).catch(function () {
+      if (token !== photoToken || !spendFormOpen()) return;
+      setReceiptHint("Couldn't read that photo. Fill this in yourself.");
+    });
   }
 
   function addCategory(name) {
@@ -887,12 +1198,14 @@
   }
 
   function clearSpendPhoto() {
+    photoToken += 1;
     if (spendPhoto && spendPhoto.previewUrl) URL.revokeObjectURL(spendPhoto.previewUrl);
     spendPhoto = null;
     var wrap = document.getElementById("photo-preview-wrap");
     wrap.hidden = true;
     document.getElementById("photo-preview").removeAttribute("src");
     document.getElementById("photo-filename").textContent = "";
+    setReceiptHint("");
   }
 
   function openIncome() {
@@ -907,6 +1220,7 @@
     document.getElementById("spend-date").value = todayYMD();
     document.getElementById("spend-error").textContent = "";
     document.getElementById("spend-new-cat").value = "";
+    setReceiptHint("");
     renderCategoryChips(null);
   }
 
@@ -992,24 +1306,35 @@
     btn.disabled = true;
     var id = newId();
     var photo = spendPhoto;
-    var done = Promise.resolve();
-    if (photo) done = idbPut(id, { blob: photo.blob, name: photo.name });
-    done.then(function () {
-      var entry = {
-        id: id,
-        type: "spending",
-        date: date,
-        category: picked.value,
-        amountCents: cents,
-        note: note,
-        createdAt: new Date().toISOString(),
-        hasPhoto: !!photo,
-        receiptName: photo ? photo.name : ""
-      };
-      entries.push(entry);
-      saveEntries(entries);
-      syncEntry(entry);
-      location.hash = "#/";
+    var ready = Promise.resolve();
+    if (photo && photo.jpeg) {
+      ready = photo.jpeg.then(function (blob) {
+        photo.blob = blob;
+      }).catch(function () {
+        if (photo && !photo.blob && photo.file) photo.blob = photo.file;
+      });
+    }
+    ready.then(function () {
+      var done = Promise.resolve();
+      if (photo && photo.blob) done = idbPut(id, { blob: photo.blob, name: photo.name });
+      return done.then(function () {
+        var entry = {
+          id: id,
+          type: "spending",
+          date: date,
+          category: picked.value,
+          amountCents: cents,
+          note: note,
+          createdAt: new Date().toISOString(),
+          hasPhoto: !!(photo && photo.blob),
+          receiptName: photo && photo.blob ? photo.name : ""
+        };
+        entries.push(entry);
+        saveEntries(entries);
+        rememberSpend(note, picked.value, photo && photo.merchant);
+        syncEntry(entry);
+        location.hash = "#/";
+      });
     }).catch(function () {
       err.textContent = "Could not store the photo on this phone. Free some space and try again.";
     }).then(function () {
@@ -1021,18 +1346,28 @@
   function onPhotoChosen(file) {
     var err = document.getElementById("spend-error");
     if (!file) return;
-    err.textContent = "Reading photo…";
-    fileToJpegBlob(file).then(function (blob) {
-      if (spendPhoto && spendPhoto.previewUrl) URL.revokeObjectURL(spendPhoto.previewUrl);
-      var name = receiptFileName(new Date());
-      var previewUrl = URL.createObjectURL(blob);
-      spendPhoto = { blob: blob, name: name, previewUrl: previewUrl };
-      document.getElementById("photo-preview").src = previewUrl;
-      document.getElementById("photo-filename").textContent = name;
-      document.getElementById("photo-preview-wrap").hidden = false;
-      err.textContent = "";
+    err.textContent = "";
+    var token = ++photoToken;
+    if (spendPhoto && spendPhoto.previewUrl) URL.revokeObjectURL(spendPhoto.previewUrl);
+    var name = receiptFileName(new Date());
+    var previewUrl = URL.createObjectURL(file);
+    var pending = fileToJpegBlob(file);
+    spendPhoto = { blob: null, name: name, previewUrl: previewUrl, merchant: "", jpeg: pending, file: file };
+    document.getElementById("photo-preview").src = previewUrl;
+    document.getElementById("photo-filename").textContent = name;
+    document.getElementById("photo-preview-wrap").hidden = false;
+    readReceipt(file, token);
+    pending.then(function (blob) {
+      if (token !== photoToken || !spendPhoto) return;
+      var url = URL.createObjectURL(blob);
+      if (spendPhoto.previewUrl) URL.revokeObjectURL(spendPhoto.previewUrl);
+      spendPhoto.blob = blob;
+      spendPhoto.previewUrl = url;
+      var img = document.getElementById("photo-preview");
+      if (img) img.src = url;
     }).catch(function () {
-      err.textContent = "Could not read that photo. Try another one.";
+      if (token !== photoToken || !spendPhoto) return;
+      if (!spendPhoto.blob) spendPhoto.blob = file;
     });
   }
 
@@ -1286,6 +1621,7 @@
 
   entries = loadEntries();
   categories = loadCategories();
+  seedLearned();
   bind();
   route(false);
   registerSW();
@@ -1298,7 +1634,9 @@
     todayYMD: todayYMD,
     parseCents: parseCents,
     formatUSD: formatUSD,
-    DEFAULT_CATEGORIES: DEFAULT_CATEGORIES
+    DEFAULT_CATEGORIES: DEFAULT_CATEGORIES,
+    guessCategory: guessCategory,
+    extractAmount: extractAmount
   };
 })();
   </script>
