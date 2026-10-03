@@ -372,14 +372,14 @@
         <li>Tap <strong>Add</strong>. The icon is named Money.</li>
       </ol>
       <h3>Backup</h3>
-      <p>Entries live on this phone. The Google Sheet is a separate shared log. This app does not write to Google Sheets. Export a backup if you want a file of what is saved here. Import merges by entry id and does not duplicate entries already on this phone.</p>
+      <p>Entries live on this phone. When the phone is online, new income and spending are also added to the shared Google Sheet, under the category you picked. Photos stay on the phone; the sheet stores the receipt file name. If the phone is offline, the entry is saved here and sent when you open the app online again. Export a backup if you want a file of what is saved here. Import merges by entry id and does not duplicate entries already on this phone.</p>
       <button class="btn btn-primary btn-block" id="export-backup" type="button">Export backup</button>
       <label class="btn btn-block" for="import-file" style="display:flex;align-items:center;justify-content:center;margin-top:8px;">Import backup</label>
       <input class="file-input" id="import-file" type="file" accept="application/json,.json" aria-label="Import backup file">
       <p id="settings-status" role="status"></p>
       <h3>Shared log</h3>
       <p><a class="sheet-link" id="sheet-link" href="https://docs.google.com/spreadsheets/d/15Yk4zozMPdaJEURppm4JmCXb--HyCgOPW8-31RTd_8g/edit" target="_blank" rel="noopener noreferrer">Shared Google Sheet</a></p>
-      <p class="sub">That sheet is not updated by this app. Type numbers there yourself, or keep using the sheet the way you already do. Photos stay on this phone unless a backup says it included them.</p>
+      <p class="sub">New income and spending from this phone show up on that sheet when you are online, under the category you picked. Photos stay on this phone unless a backup says it included them. The sheet stores the receipt file name.</p>
     </div>
   </div>
 
@@ -395,8 +395,12 @@
   <script>
 (function () {
   var DEFAULT_CATEGORIES = ["Tithes", "Mortgage", "Utilities", "Car Payment", "Groceries", "Phones", "Cards", "Medical", "Online"];
+  var SHEET_SYNC_URL = "https://script.google.com/macros/s/AKfycbxTPhnAVS2jY6TW8eVA3CCghB-ZSU93otxG2HL6ogh-QuuxIbml04nRnMi8gZxCDqrduw/exec";
+  var SHEET_SYNC_TOKEN = "hm-7k3p9q2m4n8r";
   var KEY_ENTRIES = "householdMoney.entries.v1";
   var KEY_CATS = "householdMoney.categories.v1";
+  var KEY_SYNC_QUEUE = "hm.syncQueue";
+  var SYNC_QUEUE_CAP = 50;
   var DB_NAME = "household-money";
   var DB_STORE = "photos";
   var PHOTO_BUDGET = 3 * 1024 * 1024;
@@ -768,6 +772,99 @@
     });
   }
 
+
+  function loadSyncQueue() {
+    try {
+      var list = JSON.parse(localStorage.getItem(KEY_SYNC_QUEUE) || "[]");
+      return Array.isArray(list) ? list : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveSyncQueue(list) {
+    var capped = list.slice(-SYNC_QUEUE_CAP);
+    localStorage.setItem(KEY_SYNC_QUEUE, JSON.stringify(capped));
+  }
+
+  function enqueueSync(payload) {
+    var list = loadSyncQueue();
+    list.push(payload);
+    saveSyncQueue(list);
+  }
+
+  function dollarsFromCents(cents) {
+    return Number(((Number(cents) || 0) / 100).toFixed(2));
+  }
+
+  function entrySyncPayload(entry) {
+    var income = entry.type === "income";
+    return {
+      token: SHEET_SYNC_TOKEN,
+      id: entry.id,
+      date: entry.date,
+      kind: income ? "Income" : "Spending",
+      who: income ? (entry.who || "") : "",
+      category: income ? "" : (entry.category || ""),
+      amount: dollarsFromCents(entry.amountCents),
+      note: entry.note || "",
+      receipt: entry.receiptName || ""
+    };
+  }
+
+  function postSync(payload) {
+    if (!SHEET_SYNC_URL) return Promise.resolve(false);
+    return fetch(SHEET_SYNC_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    }).then(function () {
+      return true;
+    }).catch(function () {
+      enqueueSync(payload);
+      return false;
+    });
+  }
+
+  var syncFlushing = false;
+
+  function flushSyncQueue() {
+    if (!SHEET_SYNC_URL || syncFlushing) return;
+    var list = loadSyncQueue();
+    if (!list.length) return;
+    syncFlushing = true;
+    saveSyncQueue([]);
+    var chain = Promise.resolve();
+    list.forEach(function (payload) {
+      chain = chain.then(function () {
+        return fetch(SHEET_SYNC_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify(payload)
+        }).catch(function () {
+          enqueueSync(payload);
+        });
+      });
+    });
+    chain.then(function () { syncFlushing = false; }, function () { syncFlushing = false; });
+  }
+
+  function syncEntry(entry) {
+    if (!SHEET_SYNC_URL) return;
+    postSync(entrySyncPayload(entry)).then(function (ok) {
+      if (ok) flushSyncQueue();
+    });
+  }
+
+  function syncDelete(id) {
+    if (!SHEET_SYNC_URL) return;
+    postSync({ action: "delete", id: id, token: SHEET_SYNC_TOKEN }).then(function (ok) {
+      if (ok) flushSyncQueue();
+    });
+  }
+
   function deleteCategory(name) {
     var ok = confirm('Remove "' + name + '" from the list? Spending you already saved will still show ' + name + ".");
     if (!ok) return;
@@ -784,6 +881,7 @@
     if (!confirm("Delete " + title + " (" + formatUSD(e.amountCents) + ")? This cannot be undone.")) return;
     entries = entries.filter(function (item) { return item.id !== id; });
     saveEntries(entries);
+    syncDelete(id);
     idbDelete(id).catch(function () {});
     renderHome();
   }
@@ -854,7 +952,7 @@
     if (cents == null) { err.textContent = "Enter an amount more than zero."; document.getElementById("income-amount").focus(); return; }
     saving = true;
     try {
-      entries.push({
+      var entry = {
         id: newId(),
         type: "income",
         date: date,
@@ -864,8 +962,10 @@
         createdAt: new Date().toISOString(),
         hasPhoto: false,
         receiptName: ""
-      });
+      };
+      entries.push(entry);
       saveEntries(entries);
+      syncEntry(entry);
       location.hash = "#/";
     } catch (e) {
       entries.pop();
@@ -895,7 +995,7 @@
     var done = Promise.resolve();
     if (photo) done = idbPut(id, { blob: photo.blob, name: photo.name });
     done.then(function () {
-      entries.push({
+      var entry = {
         id: id,
         type: "spending",
         date: date,
@@ -905,8 +1005,10 @@
         createdAt: new Date().toISOString(),
         hasPhoto: !!photo,
         receiptName: photo ? photo.name : ""
-      });
+      };
+      entries.push(entry);
       saveEntries(entries);
+      syncEntry(entry);
       location.hash = "#/";
     }).catch(function () {
       err.textContent = "Could not store the photo on this phone. Free some space and try again.";
@@ -1187,6 +1289,7 @@
   bind();
   route(false);
   registerSW();
+  flushSyncQueue();
 
   window.HM = {
     summarize: summarize,

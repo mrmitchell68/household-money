@@ -32,7 +32,10 @@ def main():
         assert cat in html, cat
     for label in ("Add income", "Add spending", "Shared Google Sheet", "Save photo", "eBay, Amazon, Facebook Marketplace, Walmart, and other online buys."):
         assert label in html, label
-    assert "does not write to Google Sheets" in html
+    assert "does not write to Google Sheets" not in html
+    assert "new income and spending are also added to the shared Google Sheet, under the category you picked" in html
+    assert "the sheet stores the receipt file name" in html
+    assert "sent when you open the app online again" in html
     tiny_png(PNG)
 
     with sync_playwright() as p:
