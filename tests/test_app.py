@@ -33,6 +33,7 @@ def main():
     for label in ("Add income", "Add spending", "Shared Google Sheet", "Save photo", "eBay, Amazon, Facebook Marketplace, Walmart, and other online buys."):
         assert label in html, label
     assert "does not write to Google Sheets" not in html
+    assert "Income, spending, and categories saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet." in html
     assert "new income and spending are also added to the shared Google Sheet, under the category you picked" in html
     assert "the sheet stores the receipt file name" in html
     assert "sent when you open the app online again" in html
@@ -214,6 +215,20 @@ def main():
         assert guess["total"] == "10.80"
         assert guess["due"] == "8.50"
         assert guess["balance"] == "4.25"
+
+        cats = page.evaluate("""() => {
+          const a = HM.mergeCategoryLists(["Tithes", "Pets"], ["Tithes", "Amazon"], [], []);
+          const b = HM.mergeCategoryLists(["Tithes", "Pets"], ["Tithes"], ["Tithes", "Pets"], []);
+          const c = HM.mergeCategoryLists(["Tithes"], ["Tithes", "Pets"], ["Tithes"], ["Pets"]);
+          return { a: a, b: b, c: c };
+        }""")
+        print("CATS", cats)
+        assert cats["a"]["local"] == ["Tithes", "Pets", "Amazon"]
+        assert cats["a"]["toAdd"] == ["Pets"]
+        assert cats["b"]["local"] == ["Tithes"]
+        assert "Pets" not in cats["b"]["toAdd"]
+        assert cats["c"]["local"] == ["Tithes"]
+        assert "Pets" in cats["c"]["toDeleteRetry"]
         browser.close()
     print("PASS")
 

@@ -341,7 +341,7 @@
     <div id="view-categories" hidden>
       <a class="back" href="#/">Back</a>
       <h2>Categories</h2>
-      <p class="sub">Deleting a category only takes it off this list. Spending you already saved keeps the old name.</p>
+      <p class="sub">A category added on either phone shows on the other when each app is opened online. Spending you already saved keeps its category name.</p>
       <div id="cat-list"></div>
       <form id="cat-add-form" autocomplete="off">
         <label class="field" for="cat-new">New category</label>
@@ -373,7 +373,7 @@
         <li>Tap <strong>Add</strong>. The icon is named Money.</li>
       </ol>
       <h3>Backup</h3>
-      <p>Income and spending saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet. When the phone is online, new income and spending are also added to the shared Google Sheet, under the category you picked. Photos stay on the phone that took them. The other phone sees the receipt file name only, and the sheet stores the receipt file name. If the phone is offline, the entry is saved here and sent when you open the app online again. Export a backup if you want a file of what is saved here. Import merges by entry id and does not duplicate entries already on this phone.</p>
+      <p>Income, spending, and categories saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet. When the phone is online, new income and spending are also added to the shared Google Sheet, under the category you picked. Photos stay on the phone that took them. The other phone sees the receipt file name only, and the sheet stores the receipt file name. If the phone is offline, the entry is saved here and sent when you open the app online again. Export a backup if you want a file of what is saved here. Import merges by entry id and does not duplicate entries already on this phone.</p>
       <p>A receipt photo can fill in the amount and store, and this phone remembers which category you used for that store.</p>
       <button class="btn btn-primary btn-block" id="export-backup" type="button">Export backup</button>
       <label class="btn btn-block" for="import-file" style="display:flex;align-items:center;justify-content:center;margin-top:8px;">Import backup</label>
@@ -401,6 +401,8 @@
   var SHEET_SYNC_TOKEN = "hm-7k3p9q2m4n8r";
   var KEY_ENTRIES = "householdMoney.entries.v1";
   var KEY_CATS = "householdMoney.categories.v1";
+  var KEY_CATS_SYNCED = "hm.categories.synced.v1";
+  var KEY_CATS_TOMB = "hm.categories.tomb.v1";
   var KEY_SYNC_QUEUE = "hm.syncQueue";
   var KEY_LEARNED = "hm.learned.v1";
   var SYNC_QUEUE_CAP = 50;
@@ -515,6 +517,27 @@
     localStorage.setItem(KEY_CATS, JSON.stringify(list));
   }
 
+  function loadNameList(key) {
+    try {
+      var list = JSON.parse(localStorage.getItem(key) || "[]");
+      if (!Array.isArray(list)) return [];
+      return list.filter(function (x) { return typeof x === "string"; });
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveNameList(key, list) {
+    localStorage.setItem(key, JSON.stringify(list));
+  }
+
+  function withoutName(list, name) {
+    var key = cleanCategoryName(name).toLowerCase();
+    return (list || []).filter(function (item) {
+      return cleanCategoryName(item).toLowerCase() !== key;
+    });
+  }
+
   function cleanCategoryName(name) {
     return String(name || "").trim().replace(/\s+/g, " ");
   }
@@ -525,6 +548,95 @@
       if (categories[i].toLowerCase() === key) return categories[i];
     }
     return "";
+  }
+
+  function cleanCategoryList(list) {
+    var out = [];
+    var seen = {};
+    (Array.isArray(list) ? list : []).forEach(function (raw) {
+      var clean = cleanCategoryName(raw).slice(0, 40);
+      if (!clean) return;
+      var key = clean.toLowerCase();
+      if (seen[key]) return;
+      seen[key] = true;
+      out.push(clean);
+    });
+    return out;
+  }
+
+  function mergeCategoryLists(local, remote, synced, tombstoned) {
+    var localClean = cleanCategoryList(local);
+    var remoteClean = cleanCategoryList(remote);
+    var syncedClean = cleanCategoryList(synced);
+    var tombClean = cleanCategoryList(tombstoned);
+    var remoteKeys = {};
+    var syncedKeys = {};
+    var tombKeys = {};
+    remoteClean.forEach(function (name) { remoteKeys[name.toLowerCase()] = name; });
+    syncedClean.forEach(function (name) { syncedKeys[name.toLowerCase()] = name; });
+    tombClean.forEach(function (name) { tombKeys[name.toLowerCase()] = name; });
+
+    var nextLocal = [];
+    var localKeys = {};
+    var nextSynced = [];
+    var nextSyncedKeys = {};
+    var toAdd = [];
+    var toAddKeys = {};
+    var toDeleteRetry = [];
+    var toDeleteKeys = {};
+
+    localClean.forEach(function (name) {
+      var key = name.toLowerCase();
+      if (tombKeys[key]) return;
+      if (remoteKeys[key]) {
+        nextLocal.push(name);
+        localKeys[key] = true;
+        if (!nextSyncedKeys[key]) {
+          nextSynced.push(name);
+          nextSyncedKeys[key] = true;
+        }
+        return;
+      }
+      if (syncedKeys[key]) return;
+      nextLocal.push(name);
+      localKeys[key] = true;
+      if (!toAddKeys[key]) {
+        toAdd.push(name);
+        toAddKeys[key] = true;
+      }
+    });
+
+    remoteClean.forEach(function (name) {
+      var key = name.toLowerCase();
+      if (tombKeys[key]) {
+        if (!toDeleteKeys[key]) {
+          toDeleteRetry.push(name);
+          toDeleteKeys[key] = true;
+        }
+        return;
+      }
+      if (!localKeys[key]) {
+        nextLocal.push(name);
+        localKeys[key] = true;
+      }
+      if (!nextSyncedKeys[key]) {
+        nextSynced.push(name);
+        nextSyncedKeys[key] = true;
+      }
+    });
+
+    var nextTomb = [];
+    tombClean.forEach(function (name) {
+      if (remoteKeys[name.toLowerCase()]) nextTomb.push(name);
+    });
+
+    return {
+      local: nextLocal,
+      synced: nextSynced,
+      tombstoned: nextTomb,
+      toAdd: toAdd,
+      toDeleteRetry: toDeleteRetry
+    };
   }
 
   var STARTER_MAP = [
@@ -841,6 +953,14 @@
     if (existing) return { ok: true, name: existing, already: true };
     categories.push(clean);
     saveCategories(categories);
+    saveNameList(KEY_CATS_TOMB, withoutName(loadNameList(KEY_CATS_TOMB), clean));
+    if (!sheetPullSkipped()) {
+      postSync({ action: "addCategories", token: SHEET_SYNC_TOKEN, names: [clean] }).then(function (ok) {
+        if (!ok) return;
+        flushSyncQueue();
+        setTimeout(function () { pullSheet(); }, 1200);
+      });
+    }
     return { ok: true, name: clean, already: false };
   }
 
@@ -1218,8 +1338,9 @@
       try { delete window[name]; } catch (err) { window[name] = undefined; }
       if (script.parentNode) script.parentNode.removeChild(script);
       if (generation !== pullGeneration) return;
-      if (!payload || !Array.isArray(payload.entries)) return;
-      mergePulledEntries(payload.entries);
+      if (!payload) return;
+      if (Array.isArray(payload.entries)) mergePulledEntries(payload.entries);
+      if (Array.isArray(payload.categories)) mergePulledCategories(payload.categories);
     }
     window[name] = function (payload) { finish(payload); };
     script.onerror = function () { finish(null); };
@@ -1296,12 +1417,50 @@
     }
   }
 
+  function mergePulledCategories(remote) {
+    var merged = mergeCategoryLists(
+      categories,
+      remote,
+      loadNameList(KEY_CATS_SYNCED),
+      loadNameList(KEY_CATS_TOMB)
+    );
+    categories = merged.local;
+    try { saveCategories(categories); } catch (err) {}
+    try { saveNameList(KEY_CATS_SYNCED, merged.synced); } catch (err) {}
+    try { saveNameList(KEY_CATS_TOMB, merged.tombstoned); } catch (err) {}
+    var catView = document.getElementById("view-categories");
+    if (catView && !catView.hidden) renderCategories();
+    var spendView = document.getElementById("view-spend");
+    if (spendView && !spendView.hidden) {
+      var picked = document.querySelector('#cat-chips input[name="category"]:checked');
+      renderCategoryChips(picked ? picked.value : null);
+    }
+    if (sheetPullSkipped()) return;
+    if (merged.toAdd.length) {
+      postSync({ action: "addCategories", token: SHEET_SYNC_TOKEN, names: merged.toAdd });
+    }
+    merged.toDeleteRetry.forEach(function (catName) {
+      postSync({ action: "deleteCategory", token: SHEET_SYNC_TOKEN, name: catName });
+    });
+  }
+
   function deleteCategory(name) {
-    var ok = confirm('Remove "' + name + '" from the list? Spending you already saved will still show ' + name + ".");
+    var ok = confirm('Remove "' + name + '" from both phones? Spending you already saved will still show ' + name + ".");
     if (!ok) return;
-    categories = categories.filter(function (c) { return c !== name; });
+    categories = categories.filter(function (c) { return c.toLowerCase() !== String(name).toLowerCase(); });
     saveCategories(categories);
+    saveNameList(KEY_CATS_SYNCED, withoutName(loadNameList(KEY_CATS_SYNCED), name));
+    var tomb = withoutName(loadNameList(KEY_CATS_TOMB), name);
+    tomb.push(name);
+    saveNameList(KEY_CATS_TOMB, tomb);
     renderCategories();
+    if (!sheetPullSkipped()) {
+      postSync({ action: "deleteCategory", token: SHEET_SYNC_TOKEN, name: name }).then(function (okSync) {
+        if (!okSync) return;
+        flushSyncQueue();
+        setTimeout(function () { pullSheet(); }, 1200);
+      });
+    }
   }
 
   function deleteEntry(id) {
@@ -1757,7 +1916,8 @@
     formatUSD: formatUSD,
     DEFAULT_CATEGORIES: DEFAULT_CATEGORIES,
     guessCategory: guessCategory,
-    extractAmount: extractAmount
+    extractAmount: extractAmount,
+    mergeCategoryLists: mergeCategoryLists
   };
 })();
   </script>
