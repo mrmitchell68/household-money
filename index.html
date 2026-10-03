@@ -373,7 +373,7 @@
         <li>Tap <strong>Add</strong>. The icon is named Money.</li>
       </ol>
       <h3>Backup</h3>
-      <p>Entries live on this phone. When the phone is online, new income and spending are also added to the shared Google Sheet, under the category you picked. Photos stay on the phone; the sheet stores the receipt file name. If the phone is offline, the entry is saved here and sent when you open the app online again. Export a backup if you want a file of what is saved here. Import merges by entry id and does not duplicate entries already on this phone.</p>
+      <p>Income and spending saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet. When the phone is online, new income and spending are also added to the shared Google Sheet, under the category you picked. Photos stay on the phone that took them. The other phone sees the receipt file name only, and the sheet stores the receipt file name. If the phone is offline, the entry is saved here and sent when you open the app online again. Export a backup if you want a file of what is saved here. Import merges by entry id and does not duplicate entries already on this phone.</p>
       <p>A receipt photo can fill in the amount and store, and this phone remembers which category you used for that store.</p>
       <button class="btn btn-primary btn-block" id="export-backup" type="button">Export backup</button>
       <label class="btn btn-block" for="import-file" style="display:flex;align-items:center;justify-content:center;margin-top:8px;">Import backup</label>
@@ -381,7 +381,7 @@
       <p id="settings-status" role="status"></p>
       <h3>Shared log</h3>
       <p><a class="sheet-link" id="sheet-link" href="https://docs.google.com/spreadsheets/d/15Yk4zozMPdaJEURppm4JmCXb--HyCgOPW8-31RTd_8g/edit" target="_blank" rel="noopener noreferrer">Shared Google Sheet</a></p>
-      <p class="sub">New income and spending from this phone show up on that sheet when you are online, under the category you picked. Photos stay on this phone unless a backup says it included them. The sheet stores the receipt file name.</p>
+      <p class="sub">Income and spending saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet. Photos stay on the phone that took them. The other phone sees the receipt file name only.</p>
     </div>
   </div>
 
@@ -1165,15 +1165,135 @@
   function syncEntry(entry) {
     if (!SHEET_SYNC_URL) return;
     postSync(entrySyncPayload(entry)).then(function (ok) {
-      if (ok) flushSyncQueue();
+      if (!ok) return;
+      markEntrySynced(entry.id);
+      flushSyncQueue();
+      pullSheet();
     });
   }
 
   function syncDelete(id) {
     if (!SHEET_SYNC_URL) return;
     postSync({ action: "delete", id: id, token: SHEET_SYNC_TOKEN }).then(function (ok) {
-      if (ok) flushSyncQueue();
+      if (!ok) return;
+      flushSyncQueue();
+      pullSheet();
     });
+  }
+
+  function markEntrySynced(id) {
+    var found = false;
+    entries.forEach(function (e) {
+      if (e && e.id === id) {
+        e.synced = true;
+        found = true;
+      }
+    });
+    if (found) {
+      try { saveEntries(entries); } catch (err) {}
+    }
+  }
+
+  function sheetPullSkipped() {
+    var host = location.hostname;
+    return host === "localhost" || host === "127.0.0.1";
+  }
+
+  var pullSeq = 0;
+  var pullGeneration = 0;
+
+  function pullSheet() {
+    if (sheetPullSkipped()) return;
+    if (!SHEET_SYNC_URL || !SHEET_SYNC_TOKEN) return;
+    pullSeq += 1;
+    var generation = ++pullGeneration;
+    var name = "hmPull_" + pullSeq;
+    var script = document.createElement("script");
+    var done = false;
+    var timer = setTimeout(function () { finish(null); }, 15000);
+    function finish(payload) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { delete window[name]; } catch (err) { window[name] = undefined; }
+      if (script.parentNode) script.parentNode.removeChild(script);
+      if (generation !== pullGeneration) return;
+      if (!payload || !Array.isArray(payload.entries)) return;
+      mergePulledEntries(payload.entries);
+    }
+    window[name] = function (payload) { finish(payload); };
+    script.onerror = function () { finish(null); };
+    script.src = SHEET_SYNC_URL + "?token=" + encodeURIComponent(SHEET_SYNC_TOKEN) + "&callback=" + name;
+    document.head.appendChild(script);
+  }
+
+  function mergePulledEntries(remote) {
+    var byId = {};
+    entries.forEach(function (e) {
+      if (e && e.id) byId[String(e.id)] = true;
+    });
+    var remoteIds = {};
+    var added = false;
+    var catsChanged = false;
+    remote.forEach(function (raw) {
+      if (!raw || raw.id == null || raw.id === "") return;
+      var id = String(raw.id);
+      remoteIds[id] = true;
+      if (byId[id]) return;
+      var type = raw.type === "income" || raw.type === "spending" ? raw.type : "";
+      var date = String(raw.date || "");
+      var cents = Math.round(Number(raw.amountCents) || 0);
+      if (!type || !/^\d{4}-\d{2}-\d{2}$/.test(date) || cents <= 0) return;
+      var entry = {
+        id: id,
+        type: type,
+        date: date,
+        amountCents: cents,
+        note: String(raw.note || "").slice(0, 200),
+        createdAt: typeof raw.createdAt === "string" ? raw.createdAt : (date + "T12:00:00.000Z"),
+        hasPhoto: false,
+        receiptName: String(raw.receiptName || "").slice(0, 120),
+        synced: true
+      };
+      if (type === "income") {
+        if (raw.who !== "Mitch" && raw.who !== "Tonya") return;
+        entry.who = raw.who;
+      } else {
+        var cat = cleanCategoryName(raw.category).slice(0, 40);
+        entry.category = cat;
+        if (cat && !findCategory(cat)) {
+          categories.push(cat);
+          catsChanged = true;
+        }
+      }
+      entries.push(entry);
+      byId[id] = true;
+      added = true;
+    });
+    var kept = [];
+    var removed = false;
+    entries.forEach(function (e) {
+      if (e && e.synced && e.id && !remoteIds[String(e.id)]) {
+        removed = true;
+        return;
+      }
+      kept.push(e);
+    });
+    if (removed) entries = kept;
+    if (added || removed) {
+      try { saveEntries(entries); } catch (err) {}
+    }
+    if (catsChanged) {
+      try { saveCategories(categories); } catch (err) {}
+    }
+    if (added || removed) {
+      var home = document.getElementById("view-home");
+      if (home && !home.hidden) renderHome();
+    }
+    if (catsChanged) {
+      var catView = document.getElementById("view-categories");
+      if (catView && !catView.hidden) renderCategories();
+    }
   }
 
   function deleteCategory(name) {
@@ -1626,6 +1746,7 @@
   route(false);
   registerSW();
   flushSyncQueue();
+  pullSheet();
 
   window.HM = {
     summarize: summarize,
