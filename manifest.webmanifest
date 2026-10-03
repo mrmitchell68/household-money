@@ -1,0 +1,22 @@
+{
+  "id": "./",
+  "name": "Household Money",
+  "short_name": "Money",
+  "description": "Offline household income and spending log for Mitch and Tonya. Receipt photos stay on this phone.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f6b4c",
+  "theme_color": "#0f6b4c",
+  "categories": ["finance", "productivity", "utilities"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Add income", "short_name": "Income", "url": "./#/income", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Add spending", "short_name": "Spending", "url": "./#/spend", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

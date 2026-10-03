@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f6b4c">
+  <meta name="description" content="Household money log for Mitch and Tonya. Income, spending, and receipt photos stay on this phone.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Money">
+  <title>Household Money</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <style>
+    :root {
+      --green: #0f6b4c;
+      --green-dark: #0b4f38;
+      --ink: #14241c;
+      --muted: #3e5649;
+      --bg: #e7f2ec;
+      --card: #ffffff;
+      --line: #c5d9ce;
+      --out: #8d2f28;
+      --gold: #e6b325;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      font-size: 18px;
+      line-height: 1.35;
+    }
+    body.with-dock { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+    button, input { font: inherit; color: inherit; }
+    :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+    a { color: var(--green-dark); }
+    .appbar {
+      background: var(--green);
+      color: #fff;
+      padding: calc(10px + env(safe-area-inset-top)) 16px 8px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 2px 12px;
+    }
+    .appbar a { color: #fff; font-weight: 700; text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; padding: 0 2px; }
+    .brand { font-size: 1.35rem; letter-spacing: 0.01em; white-space: nowrap; }
+    .appbar nav { display: flex; gap: 14px; margin-left: auto; }
+    .wrap { padding: 14px 14px 24px; max-width: 720px; margin: 0 auto; }
+    h1, h2, h3 { margin: 0; line-height: 1.2; }
+    h2 { font-size: 1.35rem; }
+    h3 { font-size: 1.1rem; margin-top: 18px; }
+    .sub { margin: 4px 0 10px; color: var(--muted); font-size: 0.95rem; }
+    .panel {
+      background: var(--card);
+      border-radius: 18px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .stat { text-align: center; }
+    .stat .label { color: var(--muted); font-size: 0.85rem; font-weight: 650; }
+    .num { font-size: 1.15rem; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 4px; }
+    .num.in { color: var(--green); }
+    .num.out { color: var(--out); }
+    .num.neg { color: var(--out); }
+    .dock {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+      background: #fff;
+      border-top: 1px solid var(--line);
+      z-index: 5;
+    }
+    .dock button {
+      min-height: 56px;
+      border: 0;
+      border-radius: 14px;
+      font-weight: 800;
+      color: #fff;
+    }
+    #go-income { background: var(--green); }
+    #go-spend { background: var(--green-dark); }
+    .back {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      font-weight: 700;
+      text-decoration: none;
+      margin-bottom: 8px;
+    }
+    .field { display: block; font-weight: 750; margin: 14px 0 6px; }
+    input[type="date"], input[type="number"], input[type="text"] {
+      width: 100%;
+      min-height: 52px;
+      border-radius: 12px;
+      border: 2px solid var(--line);
+      padding: 8px 12px;
+      background: #fff;
+      font-size: 16px;
+    }
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
+    fieldset {
+      border: 0;
+      margin: 14px 0 0;
+      padding: 0;
+    }
+    legend { font-weight: 750; padding: 0; margin-bottom: 8px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      position: relative;
+      min-height: 52px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 16px;
+      border-radius: 999px;
+      border: 2px solid var(--line);
+      background: #fff;
+      font-weight: 750;
+    }
+    .chip input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+    .chip:has(input:checked) {
+      background: var(--green);
+      border-color: var(--green);
+      color: #fff;
+    }
+    .chip:has(input:focus-visible) { outline: 3px solid var(--gold); outline-offset: 2px; }
+    .hint { color: var(--muted); font-size: 0.95rem; margin: 8px 0 0; }
+    .add-row { display: flex; gap: 8px; align-items: center; }
+    .add-row input { flex: 1; }
+    .btn {
+      min-height: 52px;
+      border-radius: 14px;
+      border: 2px solid var(--green);
+      background: #fff;
+      color: var(--green-dark);
+      font-weight: 800;
+      padding: 10px 14px;
+    }
+    .btn-primary { background: var(--green); color: #fff; border-color: var(--green); }
+    .btn-block { width: 100%; margin-top: 16px; }
+    .photo-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+    .file-input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+    .preview {
+      margin-top: 12px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .preview img {
+      width: 72px;
+      height: 72px;
+      object-fit: cover;
+      border-radius: 12px;
+      background: #d5e6dc;
+    }
+    .error { color: var(--out); font-weight: 750; min-height: 1.3em; margin: 8px 0 0; }
+    .entry {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      background: var(--card);
+      border-radius: 16px;
+      padding: 12px;
+      margin: 0 0 10px;
+    }
+    .entry-main { flex: 1; min-width: 0; }
+    .entry-title { font-weight: 800; }
+    .entry-meta, .receipt-name { color: var(--muted); font-size: 0.92rem; margin-top: 2px; word-break: break-word; }
+    .entry-amt { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .entry-amt.out { color: var(--out); }
+    .entry-amt.in { color: var(--green); }
+    .thumb {
+      width: 64px;
+      height: 64px;
+      padding: 0;
+      border: 0;
+      border-radius: 12px;
+      background: #d5e6dc;
+      flex: 0 0 64px;
+    }
+    .thumb img { width: 64px; height: 64px; object-fit: cover; border-radius: 12px; display: block; }
+    .delete-btn {
+      margin-top: 8px;
+      min-height: 44px;
+      border-radius: 12px;
+      border: 2px solid var(--line);
+      background: #fff;
+      font-weight: 750;
+      padding: 6px 12px;
+    }
+    .empty { color: var(--muted); margin: 8px 0 0; }
+    .cat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      background: #fff;
+      border-radius: 14px;
+      padding: 8px 8px 8px 14px;
+      margin-bottom: 8px;
+    }
+    .note { color: var(--muted); }
+    ol { padding-left: 1.2rem; }
+    li { margin: 6px 0; }
+    #photo-dialog {
+      border: 0;
+      border-radius: 16px;
+      padding: 12px;
+      width: min(440px, 96vw);
+      max-height: 92vh;
+    }
+    #photo-dialog::backdrop { background: rgba(10, 30, 22, 0.72); }
+    #photo-full { width: 100%; height: auto; max-height: 65vh; object-fit: contain; border-radius: 12px; background: #111; }
+    #photo-dialog .btn { width: 100%; margin-top: 8px; }
+    .sheet-link { font-weight: 800; font-size: 1.05rem; }
+  </style>
+</head>
+<body>
+  <header class="appbar">
+    <a class="brand" href="#/">Household Money</a>
+    <nav aria-label="Sections">
+      <a href="#/categories">Categories</a>
+      <a href="#/settings">Settings</a>
+    </nav>
+  </header>
+
+  <div class="wrap">
+    <div id="view-home">
+      <section class="panel" aria-labelledby="week-title">
+        <h1 id="week-title">This week</h1>
+        <p class="sub" id="week-range">Sunday through today</p>
+        <div class="stats">
+          <div class="stat"><div class="label">Money in</div><div class="num in" id="week-in">$0.00</div></div>
+          <div class="stat"><div class="label">Money out</div><div class="num out" id="week-out">$0.00</div></div>
+          <div class="stat"><div class="label">Left</div><div class="num" id="week-left">$0.00</div></div>
+        </div>
+      </section>
+      <section class="panel" aria-labelledby="month-title">
+        <h2 id="month-title">This month</h2>
+        <p class="sub" id="month-range">The 1st through today</p>
+        <div class="stats">
+          <div class="stat"><div class="label">Money in</div><div class="num in" id="month-in">$0.00</div></div>
+          <div class="stat"><div class="label">Money out</div><div class="num out" id="month-out">$0.00</div></div>
+          <div class="stat"><div class="label">Left</div><div class="num" id="month-left">$0.00</div></div>
+        </div>
+      </section>
+      <p class="sub">Left is money in minus money out. Saved on this phone.</p>
+      <h2>Recent</h2>
+      <div id="recent" aria-live="polite"></div>
+      <div class="dock" id="dock">
+        <button type="button" id="go-income">Add income</button>
+        <button type="button" id="go-spend">Add spending</button>
+      </div>
+    </div>
+
+    <div id="view-income" hidden>
+      <a class="back" href="#/">Back</a>
+      <h2>Add income</h2>
+      <form id="income-form" autocomplete="off">
+        <label class="field" for="income-date">Date</label>
+        <input id="income-date" name="date" type="date" required>
+        <fieldset>
+          <legend>Who</legend>
+          <div class="chips" id="who-chips">
+            <label class="chip"><input type="radio" name="who" value="Mitch"> Mitch</label>
+            <label class="chip"><input type="radio" name="who" value="Tonya"> Tonya</label>
+          </div>
+        </fieldset>
+        <label class="field" for="income-amount">Amount</label>
+        <input id="income-amount" name="amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" aria-required="true">
+        <label class="field" for="income-note">Note <span class="note">(optional)</span></label>
+        <input id="income-note" name="note" type="text" maxlength="200" placeholder="Paycheck, side work…">
+        <p class="error" id="income-error" role="alert"></p>
+        <button class="btn btn-primary btn-block" id="income-save" type="submit">Save</button>
+      </form>
+    </div>
+
+    <div id="view-spend" hidden>
+      <a class="back" href="#/">Back</a>
+      <h2>Add spending</h2>
+      <form id="spend-form" autocomplete="off">
+        <label class="field" for="spend-date">Date</label>
+        <input id="spend-date" name="date" type="date" required>
+        <fieldset>
+          <legend>Category</legend>
+          <div class="chips" id="cat-chips"></div>
+          <p class="hint" id="online-hint">Online: eBay, Amazon, Facebook Marketplace, Walmart, and other online buys.</p>
+        </fieldset>
+        <label class="field" for="spend-new-cat">New category</label>
+        <div class="add-row">
+          <input id="spend-new-cat" type="text" maxlength="40" placeholder="Type a name">
+          <button class="btn" id="spend-add-cat" type="button">Add category</button>
+        </div>
+        <label class="field" for="spend-amount">Amount</label>
+        <input id="spend-amount" name="amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" aria-required="true">
+        <label class="field" for="spend-note">Store or note <span class="note">(optional)</span></label>
+        <input id="spend-note" name="note" type="text" maxlength="200" placeholder="Store name or a short note">
+        <p class="field" id="photo-label">Receipt photo <span class="note">(optional)</span></p>
+        <div class="photo-actions">
+          <label class="btn" for="spend-camera">Take photo</label>
+          <label class="btn" for="spend-gallery">Choose photo</label>
+        </div>
+        <input class="file-input" id="spend-camera" type="file" accept="image/*" capture="environment" aria-label="Take a photo of the receipt">
+        <input class="file-input" id="spend-gallery" type="file" accept="image/*" aria-label="Choose a receipt photo from this phone">
+        <div class="preview" id="photo-preview-wrap" hidden>
+          <img id="photo-preview" alt="Receipt preview">
+          <p id="photo-filename"></p>
+        </div>
+        <p class="error" id="spend-error" role="alert"></p>
+        <button class="btn btn-primary btn-block" id="spend-save" type="submit">Save</button>
+      </form>
+    </div>
+
+    <div id="view-categories" hidden>
+      <a class="back" href="#/">Back</a>
+      <h2>Categories</h2>
+      <p class="sub">Deleting a category only takes it off this list. Spending you already saved keeps the old name.</p>
+      <div id="cat-list"></div>
+      <form id="cat-add-form" autocomplete="off">
+        <label class="field" for="cat-new">New category</label>
+        <div class="add-row">
+          <input id="cat-new" type="text" maxlength="40" placeholder="Type a name">
+          <button class="btn btn-primary" type="submit">Add category</button>
+        </div>
+        <p class="error" id="cat-error" role="alert"></p>
+      </form>
+    </div>
+
+    <div id="view-settings" hidden>
+      <a class="back" href="#/">Back</a>
+      <h2>Settings</h2>
+      <h3>Put it on your home screen</h3>
+      <p class="sub">Android Chrome and iPhone Safari</p>
+      <h3>Android Chrome</h3>
+      <ol>
+        <li>Open this page in Chrome.</li>
+        <li>Tap the three-dot menu (⋮).</li>
+        <li>Tap <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li>
+        <li>Open <strong>Money</strong> from your home screen.</li>
+      </ol>
+      <h3>iPhone Safari</h3>
+      <ol>
+        <li>Open this page in Safari.</li>
+        <li>Tap the Share button.</li>
+        <li>Tap <strong>Add to Home Screen</strong>.</li>
+        <li>Tap <strong>Add</strong>. The icon is named Money.</li>
+      </ol>
+      <h3>Backup</h3>
+      <p>Entries live on this phone. The Google Sheet is a separate shared log. This app does not write to Google Sheets. Export a backup if you want a file of what is saved here. Import merges by entry id and does not duplicate entries already on this phone.</p>
+      <button class="btn btn-primary btn-block" id="export-backup" type="button">Export backup</button>
+      <label class="btn btn-block" for="import-file" style="display:flex;align-items:center;justify-content:center;margin-top:8px;">Import backup</label>
+      <input class="file-input" id="import-file" type="file" accept="application/json,.json" aria-label="Import backup file">
+      <p id="settings-status" role="status"></p>
+      <h3>Shared log</h3>
+      <p><a class="sheet-link" id="sheet-link" href="https://docs.google.com/spreadsheets/d/15Yk4zozMPdaJEURppm4JmCXb--HyCgOPW8-31RTd_8g/edit" target="_blank" rel="noopener noreferrer">Shared Google Sheet</a></p>
+      <p class="sub">That sheet is not updated by this app. Type numbers there yourself, or keep using the sheet the way you already do. Photos stay on this phone unless a backup says it included them.</p>
+    </div>
+  </div>
+
+  <dialog id="photo-dialog" aria-label="Receipt photo">
+    <img id="photo-full" alt="Receipt photo">
+    <p id="photo-full-name"></p>
+    <button class="btn btn-primary" id="save-photo" type="button">Save photo</button>
+    <button class="btn" id="close-photo" type="button">Close</button>
+  </dialog>
+
+  <noscript><p class="wrap">Turn on JavaScript to use Household Money. Nothing is sent to an account.</p></noscript>
+
+  <script>
+(function () {
+  var DEFAULT_CATEGORIES = ["Tithes", "Mortgage", "Utilities", "Car Payment", "Groceries", "Phones", "Cards", "Medical", "Online"];
+  var KEY_ENTRIES = "householdMoney.entries.v1";
+  var KEY_CATS = "householdMoney.categories.v1";
+  var DB_NAME = "household-money";
+  var DB_STORE = "photos";
+  var PHOTO_BUDGET = 3 * 1024 * 1024;
+
+  var entries = [];
+  var categories = [];
+  var spendPhoto = null;
+  var viewingPhotoId = null;
+  var fullUrl = null;
+  var thumbUrls = [];
+  var saving = false;
+
+  function pad(n) { return String(n).padStart(2, "0"); }
+
+  function todayYMD(now) {
+    var d = now || new Date();
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  }
+
+  function weekStartYMD(now) {
+    var d = now || new Date();
+    var local = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    local.setDate(local.getDate() - local.getDay());
+    return todayYMD(local);
+  }
+
+  function monthStartYMD(now) {
+    var d = now || new Date();
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-01";
+  }
+
+  function parseCents(raw) {
+    var s = String(raw == null ? "" : raw).trim().replace(/[$,\s]/g, "");
+    if (!/^\d+(\.\d+)?$/.test(s)) return null;
+    var n = Number(s);
+    if (!isFinite(n) || n <= 0 || n > 9999999.99) return null;
+    return Math.round(n * 100);
+  }
+
+  function formatUSD(cents) {
+    var n = (Number(cents) || 0) / 100;
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+  }
+
+  function formatEntryDate(ymd) {
+    var parts = String(ymd || "").split("-");
+    if (parts.length !== 3) return ymd || "";
+    var dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  }
+
+  function summarize(list, startYMD, endYMD) {
+    var moneyIn = 0;
+    var moneyOut = 0;
+    (list || []).forEach(function (e) {
+      if (!e || typeof e.date !== "string") return;
+      if (e.date < startYMD || e.date > endYMD) return;
+      var cents = Math.round(Number(e.amountCents) || 0);
+      if (e.type === "income") moneyIn += cents;
+      else if (e.type === "spending") moneyOut += cents;
+    });
+    return { moneyIn: moneyIn, moneyOut: moneyOut, left: moneyIn - moneyOut };
+  }
+
+  function newId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return "id-" + Date.now().toString(36) + "-" + Math.random().toString(16).slice(2);
+  }
+
+  function receiptFileName(now) {
+    var d = now || new Date();
+    return "receipt-" + todayYMD(d) + "-" + pad(d.getHours()) + pad(d.getMinutes()) + ".jpg";
+  }
+
+  function loadEntries() {
+    try {
+      var list = JSON.parse(localStorage.getItem(KEY_ENTRIES) || "[]");
+      return Array.isArray(list) ? list : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveEntries(list) {
+    localStorage.setItem(KEY_ENTRIES, JSON.stringify(list));
+  }
+
+  function loadCategories() {
+    var raw = localStorage.getItem(KEY_CATS);
+    if (raw == null) {
+      var copy = DEFAULT_CATEGORIES.slice();
+      localStorage.setItem(KEY_CATS, JSON.stringify(copy));
+      return copy;
+    }
+    try {
+      var list = JSON.parse(raw);
+      if (!Array.isArray(list)) throw new Error("bad");
+      return list.filter(function (x) { return typeof x === "string" && x.trim(); }).map(function (x) { return x.trim(); });
+    } catch (e) {
+      var fallback = DEFAULT_CATEGORIES.slice();
+      localStorage.setItem(KEY_CATS, JSON.stringify(fallback));
+      return fallback;
+    }
+  }
+
+  function saveCategories(list) {
+    localStorage.setItem(KEY_CATS, JSON.stringify(list));
+  }
+
+  function cleanCategoryName(name) {
+    return String(name || "").trim().replace(/\s+/g, " ");
+  }
+
+  function findCategory(name) {
+    var key = name.toLowerCase();
+    for (var i = 0; i < categories.length; i++) {
+      if (categories[i].toLowerCase() === key) return categories[i];
+    }
+    return "";
+  }
+
+  function addCategory(name) {
+    var clean = cleanCategoryName(name);
+    if (!clean) return { ok: false, error: "Type a category name." };
+    if (clean.length > 40) return { ok: false, error: "Use 40 characters or fewer." };
+    var existing = findCategory(clean);
+    if (existing) return { ok: true, name: existing, already: true };
+    categories.push(clean);
+    saveCategories(categories);
+    return { ok: true, name: clean, already: false };
+  }
+
+  function openDb() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  function idbPut(id, value) {
+    return openDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(DB_STORE, "readwrite");
+        tx.objectStore(DB_STORE).put(value, id);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+
+  function idbGet(id) {
+    return openDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var req = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get(id);
+        req.onsuccess = function () { resolve(req.result || null); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
+  function idbDelete(id) {
+    return openDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(DB_STORE, "readwrite");
+        tx.objectStore(DB_STORE).delete(id);
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+
+  function idbAll() {
+    return openDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var out = [];
+        var tx = db.transaction(DB_STORE, "readonly");
+        var cur = tx.objectStore(DB_STORE).openCursor();
+        cur.onsuccess = function () {
+          var c = cur.result;
+          if (c) {
+            out.push({ id: c.key, value: c.value });
+            c.continue();
+          }
+        };
+        tx.oncomplete = function () { resolve(out); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+
+  function fileToJpegBlob(file) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function () {
+        var max = 1600;
+        var w = img.naturalWidth || 1;
+        var h = img.naturalHeight || 1;
+        var scale = Math.min(1, max / Math.max(w, h));
+        var canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(w * scale));
+        canvas.height = Math.max(1, Math.round(h * scale));
+        var ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(function (blob) {
+          if (!blob) reject(new Error("Could not save photo"));
+          else resolve(blob);
+        }, "image/jpeg", 0.82);
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("Could not read photo"));
+      };
+      img.src = url;
+    });
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(reader.result); };
+      reader.onerror = function () { reject(reader.error); };
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    var parts = String(dataUrl).split(",");
+    var meta = parts[0] || "";
+    var b64 = parts[1] || "";
+    var mimeMatch = meta.match(/data:(.*?);/);
+    var mime = mimeMatch ? mimeMatch[1] : "image/jpeg";
+    var bin = atob(b64);
+    var arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+  }
+
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+
+  function setMoney(prefix, sum) {
+    document.getElementById(prefix + "-in").textContent = formatUSD(sum.moneyIn);
+    document.getElementById(prefix + "-out").textContent = formatUSD(sum.moneyOut);
+    var left = document.getElementById(prefix + "-left");
+    left.textContent = formatUSD(sum.left);
+    left.classList.toggle("neg", sum.left < 0);
+  }
+
+  function revokeThumbs() {
+    thumbUrls.forEach(function (u) { URL.revokeObjectURL(u); });
+    thumbUrls = [];
+  }
+
+  function renderHome() {
+    var now = new Date();
+    var today = todayYMD(now);
+    var weekStart = weekStartYMD(now);
+    var monthStart = monthStartYMD(now);
+    setMoney("week", summarize(entries, weekStart, today));
+    setMoney("month", summarize(entries, monthStart, today));
+    document.getElementById("week-range").textContent = formatEntryDate(weekStart) + " through " + formatEntryDate(today) + " (Sunday through today)";
+    document.getElementById("month-range").textContent = formatEntryDate(monthStart) + " through " + formatEntryDate(today);
+    revokeThumbs();
+    var list = document.getElementById("recent");
+    list.textContent = "";
+    var sorted = entries.slice().sort(function (a, b) {
+      return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+    });
+    if (!sorted.length) {
+      list.appendChild(el("p", "empty", "No entries yet."));
+      return;
+    }
+    sorted.forEach(function (e) { list.appendChild(entryRow(e)); });
+    sorted.forEach(function (e) { if (e.hasPhoto) attachThumb(e.id); });
+  }
+
+  function entryRow(e) {
+    var row = el("article", "entry");
+    row.dataset.id = e.id;
+    var title = e.type === "income" ? (e.who + " income") : (e.category || "Spending");
+    if (e.hasPhoto) {
+      var thumb = el("button", "thumb");
+      thumb.type = "button";
+      thumb.dataset.id = e.id;
+      thumb.setAttribute("aria-label", "View receipt photo");
+      thumb.addEventListener("click", function () { openPhoto(e.id); });
+      row.appendChild(thumb);
+    }
+    var main = el("div", "entry-main");
+    main.appendChild(el("div", "entry-title", title));
+    var meta = formatEntryDate(e.date);
+    if (e.note) meta += " · " + e.note;
+    main.appendChild(el("div", "entry-meta", meta));
+    if (e.receiptName) main.appendChild(el("div", "receipt-name", e.receiptName));
+    var del = el("button", "delete-btn", "Delete");
+    del.type = "button";
+    del.setAttribute("aria-label", "Delete " + title + " " + formatUSD(e.amountCents));
+    del.addEventListener("click", function () { deleteEntry(e.id); });
+    main.appendChild(del);
+    row.appendChild(main);
+    var amt = el("div", "entry-amt " + (e.type === "spending" ? "out" : "in"));
+    amt.textContent = e.type === "spending" ? formatUSD(-e.amountCents) : formatUSD(e.amountCents);
+    row.appendChild(amt);
+    return row;
+  }
+
+  function attachThumb(id) {
+    idbGet(id).then(function (rec) {
+      if (!rec || !rec.blob) return;
+      var btn = document.querySelector('.thumb[data-id="' + CSS.escape(id) + '"]');
+      if (!btn) return;
+      var url = URL.createObjectURL(rec.blob);
+      thumbUrls.push(url);
+      var img = el("img");
+      img.alt = "";
+      img.src = url;
+      btn.textContent = "";
+      btn.appendChild(img);
+    }).catch(function () {});
+  }
+
+  function renderCategoryChips(selected) {
+    var wrap = document.getElementById("cat-chips");
+    wrap.textContent = "";
+    categories.forEach(function (name, i) {
+      var label = el("label", "chip");
+      var input = document.createElement("input");
+      input.type = "radio";
+      input.name = "category";
+      input.value = name;
+      input.id = "cat-choice-" + i;
+      if (selected && selected === name) input.checked = true;
+      var span = document.createElement("span");
+      span.textContent = name;
+      label.appendChild(input);
+      label.appendChild(span);
+      wrap.appendChild(label);
+    });
+  }
+
+  function renderCategories() {
+    var list = document.getElementById("cat-list");
+    list.textContent = "";
+    if (!categories.length) {
+      list.appendChild(el("p", "empty", "No categories yet. Add one below."));
+    }
+    categories.forEach(function (name) {
+      var row = el("div", "cat-row");
+      row.appendChild(el("span", "", name));
+      var btn = el("button", "delete-btn", "Delete");
+      btn.type = "button";
+      btn.setAttribute("aria-label", "Delete category " + name);
+      btn.addEventListener("click", function () { deleteCategory(name); });
+      row.appendChild(btn);
+      list.appendChild(row);
+    });
+  }
+
+  function deleteCategory(name) {
+    var ok = confirm('Remove "' + name + '" from the list? Spending you already saved will still show ' + name + ".");
+    if (!ok) return;
+    categories = categories.filter(function (c) { return c !== name; });
+    saveCategories(categories);
+    renderCategories();
+  }
+
+  function deleteEntry(id) {
+    var e = null;
+    entries.forEach(function (item) { if (item.id === id) e = item; });
+    if (!e) return;
+    var title = e.type === "income" ? (e.who + " income") : (e.category || "spending");
+    if (!confirm("Delete " + title + " (" + formatUSD(e.amountCents) + ")? This cannot be undone.")) return;
+    entries = entries.filter(function (item) { return item.id !== id; });
+    saveEntries(entries);
+    idbDelete(id).catch(function () {});
+    renderHome();
+  }
+
+  function clearSpendPhoto() {
+    if (spendPhoto && spendPhoto.previewUrl) URL.revokeObjectURL(spendPhoto.previewUrl);
+    spendPhoto = null;
+    var wrap = document.getElementById("photo-preview-wrap");
+    wrap.hidden = true;
+    document.getElementById("photo-preview").removeAttribute("src");
+    document.getElementById("photo-filename").textContent = "";
+  }
+
+  function openIncome() {
+    document.getElementById("income-form").reset();
+    document.getElementById("income-date").value = todayYMD();
+    document.getElementById("income-error").textContent = "";
+  }
+
+  function openSpend() {
+    clearSpendPhoto();
+    document.getElementById("spend-form").reset();
+    document.getElementById("spend-date").value = todayYMD();
+    document.getElementById("spend-error").textContent = "";
+    document.getElementById("spend-new-cat").value = "";
+    renderCategoryChips(null);
+  }
+
+  function showView(name, focusHeading) {
+    ["home", "income", "spend", "categories", "settings"].forEach(function (view) {
+      document.getElementById("view-" + view).hidden = view !== name;
+    });
+    document.body.classList.toggle("with-dock", name === "home");
+    if (name === "home") renderHome();
+    if (name === "income") openIncome();
+    if (name === "spend") openSpend();
+    if (name === "categories") renderCategories();
+    if (focusHeading) {
+      var head = document.querySelector("#view-" + name + " h1, #view-" + name + " h2");
+      if (head) {
+        head.setAttribute("tabindex", "-1");
+        head.focus();
+      }
+    }
+  }
+
+  function route(focusHeading) {
+    var h = location.hash || "#/";
+    var name = "home";
+    if (h.indexOf("#/income") === 0) name = "income";
+    else if (h.indexOf("#/spend") === 0) name = "spend";
+    else if (h.indexOf("#/categories") === 0) name = "categories";
+    else if (h.indexOf("#/settings") === 0) name = "settings";
+    showView(name, focusHeading);
+  }
+
+  function onIncomeSubmit(ev) {
+    ev.preventDefault();
+    if (saving) return;
+    var err = document.getElementById("income-error");
+    err.textContent = "";
+    var who = document.querySelector('#who-chips input[name="who"]:checked');
+    var date = document.getElementById("income-date").value;
+    var cents = parseCents(document.getElementById("income-amount").value);
+    var note = document.getElementById("income-note").value.trim().slice(0, 200);
+    if (!who) { err.textContent = "Choose Mitch or Tonya."; return; }
+    if (!date) { err.textContent = "Choose a date."; return; }
+    if (cents == null) { err.textContent = "Enter an amount more than zero."; document.getElementById("income-amount").focus(); return; }
+    saving = true;
+    try {
+      entries.push({
+        id: newId(),
+        type: "income",
+        date: date,
+        who: who.value,
+        amountCents: cents,
+        note: note,
+        createdAt: new Date().toISOString(),
+        hasPhoto: false,
+        receiptName: ""
+      });
+      saveEntries(entries);
+      location.hash = "#/";
+    } catch (e) {
+      entries.pop();
+      err.textContent = "This phone blocked saving. Free some space and try again.";
+    } finally {
+      saving = false;
+    }
+  }
+
+  function onSpendSubmit(ev) {
+    ev.preventDefault();
+    if (saving) return;
+    var err = document.getElementById("spend-error");
+    err.textContent = "";
+    var picked = document.querySelector('#cat-chips input[name="category"]:checked');
+    var date = document.getElementById("spend-date").value;
+    var cents = parseCents(document.getElementById("spend-amount").value);
+    var note = document.getElementById("spend-note").value.trim().slice(0, 200);
+    if (!picked) { err.textContent = "Choose a category."; return; }
+    if (!date) { err.textContent = "Choose a date."; return; }
+    if (cents == null) { err.textContent = "Enter an amount more than zero."; document.getElementById("spend-amount").focus(); return; }
+    saving = true;
+    var btn = document.getElementById("spend-save");
+    btn.disabled = true;
+    var id = newId();
+    var photo = spendPhoto;
+    var done = Promise.resolve();
+    if (photo) done = idbPut(id, { blob: photo.blob, name: photo.name });
+    done.then(function () {
+      entries.push({
+        id: id,
+        type: "spending",
+        date: date,
+        category: picked.value,
+        amountCents: cents,
+        note: note,
+        createdAt: new Date().toISOString(),
+        hasPhoto: !!photo,
+        receiptName: photo ? photo.name : ""
+      });
+      saveEntries(entries);
+      location.hash = "#/";
+    }).catch(function () {
+      err.textContent = "Could not store the photo on this phone. Free some space and try again.";
+    }).then(function () {
+      saving = false;
+      btn.disabled = false;
+    });
+  }
+
+  function onPhotoChosen(file) {
+    var err = document.getElementById("spend-error");
+    if (!file) return;
+    err.textContent = "Reading photo…";
+    fileToJpegBlob(file).then(function (blob) {
+      if (spendPhoto && spendPhoto.previewUrl) URL.revokeObjectURL(spendPhoto.previewUrl);
+      var name = receiptFileName(new Date());
+      var previewUrl = URL.createObjectURL(blob);
+      spendPhoto = { blob: blob, name: name, previewUrl: previewUrl };
+      document.getElementById("photo-preview").src = previewUrl;
+      document.getElementById("photo-filename").textContent = name;
+      document.getElementById("photo-preview-wrap").hidden = false;
+      err.textContent = "";
+    }).catch(function () {
+      err.textContent = "Could not read that photo. Try another one.";
+    });
+  }
+
+  function closePhoto() {
+    var dlg = document.getElementById("photo-dialog");
+    if (dlg.open) dlg.close();
+    if (fullUrl) URL.revokeObjectURL(fullUrl);
+    fullUrl = null;
+    viewingPhotoId = null;
+  }
+
+  function openPhoto(id) {
+    idbGet(id).then(function (rec) {
+      if (!rec || !rec.blob) return;
+      if (fullUrl) URL.revokeObjectURL(fullUrl);
+      viewingPhotoId = id;
+      fullUrl = URL.createObjectURL(rec.blob);
+      document.getElementById("photo-full").src = fullUrl;
+      document.getElementById("photo-full-name").textContent = rec.name || "";
+      document.getElementById("photo-dialog").showModal();
+    }).catch(function () {});
+  }
+
+  function savePhotoFile() {
+    if (!viewingPhotoId) return;
+    idbGet(viewingPhotoId).then(function (rec) {
+      if (!rec || !rec.blob) return;
+      var name = rec.name || "receipt.jpg";
+      var file = new File([rec.blob], name, { type: rec.blob.type || "image/jpeg" });
+      var can = navigator.canShare && navigator.canShare({ files: [file] });
+      if (can) {
+        navigator.share({ files: [file], title: name }).catch(function (err) {
+          if (err && err.name === "AbortError") return;
+          downloadBlob(rec.blob, name);
+        });
+        return;
+      }
+      downloadBlob(rec.blob, name);
+    }).catch(function () {});
+  }
+
+  function downloadBlob(blob, name) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+  }
+
+  function sanitizeEntry(raw) {
+    if (!raw || (raw.type !== "income" && raw.type !== "spending")) return null;
+    if (typeof raw.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date)) return null;
+    var amountCents = Number(raw.amountCents);
+    if (!isFinite(amountCents) || amountCents <= 0) return null;
+    var entry = {
+      id: String(raw.id),
+      type: raw.type,
+      date: raw.date,
+      amountCents: Math.round(amountCents),
+      note: String(raw.note || "").slice(0, 200),
+      createdAt: typeof raw.createdAt === "string" ? raw.createdAt : new Date().toISOString(),
+      hasPhoto: !!raw.hasPhoto,
+      receiptName: String(raw.receiptName || "").slice(0, 120)
+    };
+    if (raw.type === "income") {
+      if (raw.who !== "Mitch" && raw.who !== "Tonya") return null;
+      entry.who = raw.who;
+    } else {
+      entry.category = String(raw.category || "Uncategorized").slice(0, 40);
+    }
+    return entry;
+  }
+
+  function exportBackup() {
+    var status = document.getElementById("settings-status");
+    status.textContent = "Preparing backup…";
+    idbAll().then(function (all) {
+      var total = 0;
+      all.forEach(function (item) {
+        if (item.value && item.value.blob) total += item.value.blob.size || 0;
+      });
+      var include = total <= PHOTO_BUDGET;
+      var photoNote;
+      if (!all.length) photoNote = "No receipt photos were on this phone.";
+      else if (include) photoNote = "Receipt photos are included in this file.";
+      else photoNote = "Photos stay on this phone. They were left out of this backup because together they are over a few MB.";
+      var photos = [];
+      var chain = Promise.resolve();
+      if (include) {
+        all.forEach(function (item) {
+          chain = chain.then(function () {
+            if (!item.value || !item.value.blob) return;
+            return blobToDataUrl(item.value.blob).then(function (dataUrl) {
+              photos.push({
+                id: item.id,
+                name: item.value.name || "receipt.jpg",
+                type: item.value.blob.type || "image/jpeg",
+                dataUrl: dataUrl
+              });
+            });
+          });
+        });
+      }
+      return chain.then(function () {
+        var payload = {
+          app: "Household Money",
+          version: 1,
+          exportedAt: new Date().toISOString(),
+          categories: categories,
+          entries: entries,
+          photosIncluded: include,
+          photoNote: photoNote,
+          photos: photos
+        };
+        downloadBlob(new Blob([JSON.stringify(payload)], { type: "application/json" }), "household-money-backup-" + todayYMD() + ".json");
+        status.textContent = include
+          ? "Backup downloaded. " + photoNote
+          : photoNote;
+      });
+    }).catch(function () {
+      status.textContent = "Could not make a backup.";
+    });
+  }
+
+  function importBackup(file) {
+    return file.text().then(function (text) {
+      var data = JSON.parse(text);
+      if (!data || !Array.isArray(data.entries)) throw new Error("That file is not a Household Money backup.");
+      var have = {};
+      entries.forEach(function (e) { have[e.id] = true; });
+      var added = 0;
+      var skipped = 0;
+      data.entries.forEach(function (raw) {
+        if (!raw || !raw.id) { skipped++; return; }
+        var id = String(raw.id);
+        if (have[id]) { skipped++; return; }
+        var entry = sanitizeEntry(raw);
+        if (!entry) { skipped++; return; }
+        entries.push(entry);
+        have[id] = true;
+        added++;
+      });
+      if (Array.isArray(data.categories)) {
+        data.categories.forEach(function (c) {
+          if (typeof c !== "string") return;
+          var clean = cleanCategoryName(c);
+          if (!clean || clean.length > 40) return;
+          if (!findCategory(clean)) categories.push(clean);
+        });
+        saveCategories(categories);
+      }
+      saveEntries(entries);
+      var photoChain = Promise.resolve();
+      if (Array.isArray(data.photos)) {
+        data.photos.forEach(function (p) {
+          photoChain = photoChain.then(function () {
+            if (!p || !p.id || !p.dataUrl) return;
+            return idbGet(p.id).then(function (existing) {
+              if (existing) return;
+              var blob = dataUrlToBlob(p.dataUrl);
+              return idbPut(String(p.id), { blob: blob, name: p.name || "receipt.jpg" });
+            });
+          });
+        });
+      }
+      return photoChain.then(function () {
+        return {
+          added: added,
+          skipped: skipped,
+          photoNote: data.photosIncluded === false ? (data.photoNote || "Photos stay on this phone.") : ""
+        };
+      });
+    });
+  }
+
+  function registerSW() {
+    if (!("serviceWorker" in navigator)) return;
+    var hadController = !!navigator.serviceWorker.controller;
+    var reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", function () {
+      if (!hadController || reloaded) return;
+      reloaded = true;
+      location.reload();
+    });
+    navigator.serviceWorker.register("./sw.js").then(function (reg) {
+      var kick = function (worker) {
+        if (worker) worker.postMessage("skipWaiting");
+      };
+      kick(reg.waiting);
+      reg.addEventListener("updatefound", function () {
+        var nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener("statechange", function () {
+          if (nw.state === "installed") kick(reg.waiting || nw);
+        });
+      });
+    }).catch(function () {});
+  }
+
+  function bind() {
+    document.getElementById("go-income").addEventListener("click", function () { location.hash = "#/income"; });
+    document.getElementById("go-spend").addEventListener("click", function () { location.hash = "#/spend"; });
+    document.getElementById("income-form").addEventListener("submit", onIncomeSubmit);
+    document.getElementById("spend-form").addEventListener("submit", onSpendSubmit);
+    document.getElementById("spend-camera").addEventListener("change", function (ev) {
+      var file = ev.target.files && ev.target.files[0];
+      onPhotoChosen(file);
+    });
+    document.getElementById("spend-gallery").addEventListener("change", function (ev) {
+      var file = ev.target.files && ev.target.files[0];
+      onPhotoChosen(file);
+    });
+    document.getElementById("spend-add-cat").addEventListener("click", function () {
+      var input = document.getElementById("spend-new-cat");
+      var err = document.getElementById("spend-error");
+      var result = addCategory(input.value);
+      if (!result.ok) { err.textContent = result.error; return; }
+      err.textContent = result.already ? "Already on the list. It's selected." : "";
+      input.value = "";
+      renderCategoryChips(result.name);
+    });
+    document.getElementById("cat-add-form").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var input = document.getElementById("cat-new");
+      var err = document.getElementById("cat-error");
+      var result = addCategory(input.value);
+      if (!result.ok) { err.textContent = result.error; return; }
+      err.textContent = result.already ? "Already on the list." : "";
+      input.value = "";
+      renderCategories();
+    });
+    document.getElementById("export-backup").addEventListener("click", exportBackup);
+    document.getElementById("import-file").addEventListener("change", function (ev) {
+      var file = ev.target.files && ev.target.files[0];
+      ev.target.value = "";
+      if (!file) return;
+      var status = document.getElementById("settings-status");
+      importBackup(file).then(function (result) {
+        status.textContent = "Added " + result.added + ". Skipped " + result.skipped + " already on this phone. " + (result.photoNote || "");
+      }).catch(function (e) {
+        status.textContent = (e && e.message) ? e.message : "Could not read that backup.";
+      });
+    });
+    document.getElementById("save-photo").addEventListener("click", savePhotoFile);
+    document.getElementById("close-photo").addEventListener("click", closePhoto);
+    window.addEventListener("hashchange", function () { route(true); });
+  }
+
+  entries = loadEntries();
+  categories = loadCategories();
+  bind();
+  route(false);
+  registerSW();
+
+  window.HM = {
+    summarize: summarize,
+    weekStartYMD: weekStartYMD,
+    monthStartYMD: monthStartYMD,
+    todayYMD: todayYMD,
+    parseCents: parseCents,
+    formatUSD: formatUSD,
+    DEFAULT_CATEGORIES: DEFAULT_CATEGORIES
+  };
+})();
+  </script>
+</body>
+</html>
