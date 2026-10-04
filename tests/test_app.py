@@ -1,5 +1,6 @@
 """Household Money UI check. Uses a throwaway browser profile. Does not seed the app."""
 import json
+import re
 import struct
 import zlib
 from pathlib import Path
@@ -38,8 +39,14 @@ def main():
     assert "the sheet stores the receipt file name" in html
     assert "sent when you open the app online again" in html
     assert "this phone remembers which category you used for that store" in html
-    assert "hm-v1.7.1" in (ROOT / "sw.js").read_text()
+    assert "hm-v1.7.2" in (ROOT / "sw.js").read_text()
     assert "Save reminder" in html
+    assert 'id="reminder-status"' in html
+    assert "Day of the month has to be from 1 to 31." in html
+    day_input = re.search(r'<input id="reminder-day"[^>]*>', html).group(0)
+    time_input = re.search(r'<input id="reminder-time"[^>]*>', html).group(0)
+    assert "required" not in day_input
+    assert "required" not in time_input
     assert "Not this time" in html
     assert "Not saved until you tap Approve" in html
     tiny_png(PNG)
@@ -314,6 +321,43 @@ def main():
         page.locator("#reminder-note").fill("bill reminder test")
         page.locator("#reminder-save").click()
         page.wait_for_function("() => document.querySelector('#reminder-list').innerText.includes('Mortgage')")
+        assert text(page, "#reminder-status") == "Saved."
+        kept = page.evaluate("""() => {
+          const before = JSON.parse(localStorage.getItem('hm.reminders.v1'));
+          const saved = before.find(r => r.category === 'Mortgage' && r.note === 'bill reminder test');
+          if (!saved || saved.synced) return { ok: false, reason: 'not saved unsynced' };
+          HM.mergePulledReminders([]);
+          const afterEmpty = JSON.parse(localStorage.getItem('hm.reminders.v1'));
+          const still = afterEmpty.find(r => r.id === saved.id);
+          const ghost = {
+            id: 'ghost-confirmed', category: 'Utilities', dayOfMonth: 2, daysBefore: 1,
+            time: '09:00', active: true, amountCents: 100, note: 'confirmed ghost',
+            who: '', handled: {}, createdYMD: '2026-10-01'
+          };
+          HM.mergePulledReminders([ghost]);
+          const withGhost = JSON.parse(localStorage.getItem('hm.reminders.v1'));
+          const ghostRow = withGhost.find(r => r.id === 'ghost-confirmed');
+          HM.mergePulledReminders([]);
+          const end = JSON.parse(localStorage.getItem('hm.reminders.v1'));
+          return {
+            still: !!still && still.synced === false,
+            listHasMortgage: document.querySelector('#reminder-list').innerText.includes('Mortgage'),
+            ghostSynced: !!(ghostRow && ghostRow.synced === true),
+            ghostGone: !end.some(r => r.id === 'ghost-confirmed'),
+            mortgageKept: end.some(r => r.id === saved.id && r.synced === false),
+            listAfter: document.querySelector('#reminder-list').innerText.includes('Mortgage') && !document.querySelector('#reminder-list').innerText.includes('Utilities')
+          };
+        }""")
+        print("REMINDER_EMPTY_PULL", kept)
+        assert kept["still"] is True
+        assert kept["listHasMortgage"] is True
+        assert kept["ghostSynced"] is True
+        assert kept["ghostGone"] is True
+        assert kept["mortgageKept"] is True
+        assert kept["listAfter"] is True
+        page.locator("#reminder-note").fill("bill reminder test")
+        page.locator("#reminder-note").fill("")
+        assert text(page, "#reminder-status") == ""
         mid = page.evaluate("""() => {
           const entries = JSON.parse(localStorage.getItem('householdMoney.entries.v1'));
           const queue = JSON.parse(localStorage.getItem('hm.syncQueue') || '[]');
