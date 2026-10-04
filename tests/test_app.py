@@ -38,6 +38,10 @@ def main():
     assert "the sheet stores the receipt file name" in html
     assert "sent when you open the app online again" in html
     assert "this phone remembers which category you used for that store" in html
+    assert "hm-v1.7.0" in (ROOT / "sw.js").read_text()
+    assert "Save reminder" in html
+    assert "Not this time" in html
+    assert "Not saved until you tap Approve" in html
     tiny_png(PNG)
 
     with sync_playwright() as p:
@@ -267,6 +271,117 @@ def main():
         assert roll["neg"]["monthLeftover"] == 1200
         assert roll["neg"]["leftNow"] == -3800
         assert roll["neg"]["totalSaved"] == -200
+
+        occ = page.evaluate("""() => {
+          const now = new Date(2026, 9, 4, 15, 0, 0);
+          const made = {
+            id: 'r1', category: 'Mortgage', dayOfMonth: 1, daysBefore: 7, time: '09:00',
+            active: true, createdYMD: '2026-10-04', handled: {}, amountCents: 10000
+          };
+          const old = HM.reminderOccurrences(Object.assign({}, made, { createdYMD: '' }), now);
+          const fresh = HM.reminderOccurrences(made, now);
+          const future = HM.reminderOccurrences(Object.assign({}, made, { dayOfMonth: 20, daysBefore: 7, time: '09:00' }), now);
+          return {
+            oldMonths: old.map(o => o.monthKey),
+            freshMonths: fresh.map(o => o.monthKey),
+            future: future.length,
+            text: HM.ordinalDay(1)
+          };
+        }""")
+        print("REMIND_LOGIC", occ)
+        assert occ["text"] == "1st"
+        assert "2026-09" in occ["oldMonths"]
+        assert "2026-10" in occ["oldMonths"]
+        assert occ["freshMonths"] == ["2026-10"]
+        assert occ["future"] == 0
+
+        page.evaluate("""() => {
+          if (!window.Notification) return;
+          try {
+            Object.defineProperty(Notification, 'permission', { configurable: true, get: function () { return 'denied'; } });
+          } catch (e) {}
+          Notification.requestPermission = function () { return Promise.resolve('denied'); };
+        }""")
+        before_n = page.evaluate("() => JSON.parse(localStorage.getItem('householdMoney.entries.v1')).length")
+        page.locator("a[href='#/reminders']").click()
+        page.wait_for_selector("#reminder-form")
+        page.locator("#rem-cat-chips label.chip", has_text="Mortgage").click()
+        page.locator("#reminder-amount").fill("80")
+        day = page.evaluate("() => String(new Date().getDate())")
+        page.locator("#reminder-day").fill(day)
+        page.locator("#reminder-days label.chip", has_text="7 days").click()
+        page.locator("#reminder-time").fill("00:00")
+        page.locator("#reminder-note").fill("bill reminder test")
+        page.locator("#reminder-save").click()
+        page.wait_for_function("() => document.querySelector('#reminder-list').innerText.includes('Mortgage')")
+        mid = page.evaluate("""() => {
+          const entries = JSON.parse(localStorage.getItem('householdMoney.entries.v1'));
+          const queue = JSON.parse(localStorage.getItem('hm.syncQueue') || '[]');
+          return {
+            count: entries.length,
+            notes: entries.map(e => e.note || ''),
+            queued: queue.some(item => item && (item.action === 'saveReminder' || item.kind === 'Spending'))
+          };
+        }""")
+        print("BEFORE_APPROVE", mid)
+        assert mid["count"] == before_n
+        assert "bill reminder test" not in mid["notes"]
+        assert mid["queued"] is False
+        page.locator("a.brand").click()
+        page.wait_for_selector("#due-list .due-card")
+        assert "Mortgage" in page.locator("#due-list").inner_text()
+        still = page.evaluate("() => JSON.parse(localStorage.getItem('householdMoney.entries.v1')).length")
+        assert still == before_n
+        page.locator("#due-list .due-card", has_text="Mortgage").locator("button", has_text="Approve").click()
+        page.wait_for_selector("#approve-date")
+        default_date = page.locator("#approve-date").input_value()
+        print("DEFAULT_DUE", default_date)
+        assert default_date.endswith("-" + day.zfill(2)) or default_date[8:10] == day.zfill(2)
+        page.locator("#approve-date").fill("2026-10-20")
+        page.locator("#approve-amount").fill("81.50")
+        untouched = page.evaluate("""() => JSON.parse(localStorage.getItem('householdMoney.entries.v1')).filter(e => e.note === 'bill reminder test').length""")
+        assert untouched == 0
+        page.locator("#approve-save").click()
+        page.wait_for_function("() => location.hash === '#/' && JSON.parse(localStorage.getItem('householdMoney.entries.v1')).some(e => e.note === 'bill reminder test')")
+        approved = page.evaluate("""() => {
+          const entries = JSON.parse(localStorage.getItem('householdMoney.entries.v1'));
+          const hit = entries.find(e => e.note === 'bill reminder test');
+          return { count: entries.length, hit: hit };
+        }""")
+        print("APPROVED", approved)
+        assert approved["count"] == before_n + 1
+        assert approved["hit"]["type"] == "spending"
+        assert approved["hit"]["category"] == "Mortgage"
+        assert approved["hit"]["date"] == "2026-10-20"
+        assert approved["hit"]["amountCents"] == 8150
+
+        page.locator("a[href='#/reminders']").click()
+        page.wait_for_selector("#reminder-form")
+        page.locator("#rem-cat-chips label.chip", has_text="Car Payment").click()
+        page.locator("#reminder-amount").fill("40")
+        page.locator("#reminder-day").fill(day)
+        page.locator("#reminder-time").fill("00:00")
+        page.locator("#reminder-note").fill("skip me")
+        page.locator("#reminder-save").click()
+        page.wait_for_function("() => document.querySelector('#reminder-list').innerText.includes('Car Payment')")
+        page.locator("a.brand").click()
+        page.locator("#due-list .due-card", has_text="Car Payment").locator("button", has_text="Not this time").click()
+        page.wait_for_function("() => !document.querySelector('#due-list .due-card') || !document.querySelector('#due-list').innerText.includes('Car Payment')")
+        skipped = page.evaluate("""() => {
+          const entries = JSON.parse(localStorage.getItem('householdMoney.entries.v1'));
+          const reminders = JSON.parse(localStorage.getItem('hm.reminders.v1'));
+          const car = reminders.find(r => r.category === 'Car Payment');
+          const month = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0');
+          return {
+            count: entries.length,
+            skipNotes: entries.filter(e => e.note === 'skip me').length,
+            handled: car && car.handled ? car.handled[month] : ''
+          };
+        }""")
+        print("SKIPPED", skipped)
+        assert skipped["count"] == before_n + 1
+        assert skipped["skipNotes"] == 0
+        assert skipped["handled"] == "skipped"
         browser.close()
     print("PASS")
 

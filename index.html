@@ -240,12 +240,34 @@
     #photo-full { width: 100%; height: auto; max-height: 65vh; object-fit: contain; border-radius: 12px; background: #111; }
     #photo-dialog .btn { width: 100%; margin-top: 8px; }
     .sheet-link { font-weight: 800; font-size: 1.05rem; }
+    input[type="time"] {
+      width: 100%;
+      min-height: 52px;
+      border-radius: 12px;
+      border: 2px solid var(--line);
+      padding: 8px 12px;
+      background: #fff;
+      font-size: 16px;
+    }
+    .due-card {
+      background: #fff8e6;
+      border: 2px solid var(--gold);
+      border-radius: 18px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    .due-card h2 { font-size: 1.25rem; }
+    .due-line { margin: 6px 0 0; font-weight: 750; }
+    .due-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .due-actions .btn { margin-top: 8px; }
+    .row-actions { display: flex; gap: 8px; }
   </style>
 </head>
 <body>
   <header class="appbar">
     <a class="brand" href="#/">Household Money</a>
     <nav aria-label="Sections">
+      <a href="#/reminders">Reminders</a>
       <a href="#/categories">Categories</a>
       <a href="#/settings">Settings</a>
     </nav>
@@ -253,6 +275,7 @@
 
   <div class="wrap">
     <div id="view-home">
+      <div id="due-list" aria-live="polite"></div>
       <section class="panel" aria-labelledby="week-title">
         <h1 id="week-title">This week</h1>
         <p class="sub" id="week-range">Monday through today</p>
@@ -395,6 +418,72 @@
       </form>
     </div>
 
+
+    <div id="view-reminders" hidden>
+      <a class="back" href="#/">Back</a>
+      <h2>Reminders</h2>
+      <p class="sub">Set a bill, like the mortgage on the 1st or the car on the 15th. Both phones see the same list. Nothing is saved as spending until you tap Approve, and you can change the date if you pay on a different day.</p>
+      <div id="reminder-list"></div>
+      <h3 id="reminder-form-title">Add reminder</h3>
+      <form id="reminder-form" autocomplete="off">
+        <input id="reminder-id" type="hidden" value="">
+        <fieldset>
+          <legend>Category</legend>
+          <div class="chips" id="rem-cat-chips"></div>
+        </fieldset>
+        <label class="field" for="reminder-new-cat">Or type a category</label>
+        <div class="add-row">
+          <input id="reminder-new-cat" type="text" maxlength="40" placeholder="Type a name">
+          <button class="btn" id="reminder-add-cat" type="button">Add category</button>
+        </div>
+        <label class="field" for="reminder-amount">Amount <span class="note">(optional)</span></label>
+        <input id="reminder-amount" name="amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00">
+        <label class="field" for="reminder-day">Day of the month</label>
+        <input id="reminder-day" name="day" type="number" inputmode="numeric" min="1" max="31" step="1" required placeholder="1">
+        <fieldset>
+          <legend>Remind this many days before</legend>
+          <div class="chips" id="reminder-days">
+            <label class="chip"><input type="radio" name="days-before" value="7" checked> 7 days</label>
+            <label class="chip"><input type="radio" name="days-before" value="3"> 3 days</label>
+            <label class="chip"><input type="radio" name="days-before" value="1"> 1 day</label>
+          </div>
+          <label class="field" for="reminder-days-custom">Custom days before</label>
+          <input id="reminder-days-custom" type="number" inputmode="numeric" min="0" max="60" step="1" placeholder="Or type a number, including 0">
+        </fieldset>
+        <label class="field" for="reminder-time">Time of day</label>
+        <input id="reminder-time" name="time" type="time" required value="09:00">
+        <fieldset>
+          <legend>Who <span class="note">(optional)</span></legend>
+          <div class="chips" id="reminder-who-chips">
+            <label class="chip"><input type="radio" name="reminder-who" value="Mitch"> Mitch</label>
+            <label class="chip"><input type="radio" name="reminder-who" value="Tonya"> Tonya</label>
+          </div>
+        </fieldset>
+        <label class="field" for="reminder-note">Note <span class="note">(optional)</span></label>
+        <input id="reminder-note" name="note" type="text" maxlength="200" placeholder="Mortgage, car payment…">
+        <p class="hint">Saving a reminder does not add it to spending. When it is due, you approve it, and you can change the date first.</p>
+        <p class="error" id="reminder-error" role="alert"></p>
+        <button class="btn btn-primary btn-block" id="reminder-save" type="submit">Save reminder</button>
+      </form>
+    </div>
+
+    <div id="view-approve" hidden>
+      <a class="back" href="#/">Back</a>
+      <h2 id="approve-title">Approve</h2>
+      <p class="sub" id="approve-sub">This is not saved until you tap Approve. Change the date if you pay on a different day.</p>
+      <form id="approve-form" autocomplete="off">
+        <label class="field" for="approve-date">Date</label>
+        <input id="approve-date" name="date" type="date" required>
+        <label class="field" for="approve-amount">Amount</label>
+        <input id="approve-amount" name="amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" aria-required="true">
+        <label class="field" for="approve-note">Note <span class="note">(optional)</span></label>
+        <input id="approve-note" name="note" type="text" maxlength="200">
+        <p class="error" id="approve-error" role="alert"></p>
+        <button class="btn btn-primary btn-block" id="approve-save" type="submit">Approve</button>
+        <button class="btn btn-block" id="approve-skip" type="button">Not this time</button>
+      </form>
+    </div>
+
     <div id="view-settings" hidden>
       <a class="back" href="#/">Back</a>
       <h2>Settings</h2>
@@ -418,6 +507,7 @@
       <p>Income, spending, and categories saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet. When the phone is online, new income and spending are also added to the shared Google Sheet, under the category you picked. Photos stay on the phone that took them. The other phone sees the receipt file name only, and the sheet stores the receipt file name. If the phone is offline, the entry is saved here and sent when you open the app online again. Export a backup if you want a file of what is saved here. Import merges by entry id and does not duplicate entries already on this phone.</p>
       <p>A receipt photo can fill in the amount and store, and this phone remembers which category you used for that store.</p>
       <p>Savings you put aside or take out is saved the same way and is not counted as spending. What is left after income, spending, and savings carries to the next month, even if it is negative.</p>
+      <p>Bill reminders are shared the same way. A reminder is not spending until you tap Approve, and you can change the date first.</p>
       <button class="btn btn-primary btn-block" id="export-backup" type="button">Export backup</button>
       <label class="btn btn-block" for="import-file" style="display:flex;align-items:center;justify-content:center;margin-top:8px;">Import backup</label>
       <input class="file-input" id="import-file" type="file" accept="application/json,.json" aria-label="Import backup file">
@@ -448,6 +538,9 @@
   var KEY_CATS_TOMB = "hm.categories.tomb.v1";
   var KEY_SYNC_QUEUE = "hm.syncQueue";
   var KEY_LEARNED = "hm.learned.v1";
+  var KEY_REMINDERS = "hm.reminders.v1";
+  var KEY_REMINDER_TOMB = "hm.reminders.tomb.v1";
+  var KEY_NOTIFY_ASKED = "hm.notify.asked";
   var SYNC_QUEUE_CAP = 50;
   var DB_NAME = "household-money";
   var DB_STORE = "photos";
@@ -455,6 +548,9 @@
 
   var entries = [];
   var categories = [];
+  var reminders = [];
+  var notifiedKeys = {};
+  var approveTarget = null;
   var spendPhoto = null;
   var photoToken = 0;
   var ocrWorkerPromise = null;
@@ -1186,6 +1282,7 @@
   }
 
   function renderHome() {
+    renderDueBanners();
     var now = new Date();
     var today = todayYMD(now);
     var weekStart = weekStartYMD(now);
@@ -1346,6 +1443,7 @@
 
   function postSync(payload) {
     if (!SHEET_SYNC_URL) return Promise.resolve(false);
+    if (sheetPullSkipped()) return Promise.resolve(false);
     return fetch(SHEET_SYNC_URL, {
       method: "POST",
       mode: "no-cors",
@@ -1362,6 +1460,7 @@
   var syncFlushing = false;
 
   function flushSyncQueue() {
+    if (sheetPullSkipped()) return;
     if (!SHEET_SYNC_URL || syncFlushing) return;
     var list = loadSyncQueue();
     if (!list.length) return;
@@ -1442,6 +1541,7 @@
       if (!payload) return;
       if (Array.isArray(payload.entries)) mergePulledEntries(payload.entries);
       if (Array.isArray(payload.categories)) mergePulledCategories(payload.categories);
+      if (Array.isArray(payload.reminders)) mergePulledReminders(payload.reminders);
     }
     window[name] = function (payload) { finish(payload); };
     script.onerror = function () { finish(null); };
@@ -1616,7 +1716,7 @@
   }
 
   function showView(name, focusHeading) {
-    ["home", "income", "spend", "savings", "categories", "settings"].forEach(function (view) {
+    ["home", "income", "spend", "savings", "categories", "reminders", "approve", "settings"].forEach(function (view) {
       document.getElementById("view-" + view).hidden = view !== name;
     });
     document.body.classList.toggle("with-dock", name === "home");
@@ -1625,6 +1725,8 @@
     if (name === "spend") openSpend();
     if (name === "savings") openSavings();
     if (name === "categories") renderCategories();
+    if (name === "reminders") openReminders();
+    if (name === "approve") openApprove();
     if (focusHeading) {
       var head = document.querySelector("#view-" + name + " h1, #view-" + name + " h2");
       if (head) {
@@ -1640,6 +1742,8 @@
     if (h.indexOf("#/income") === 0) name = "income";
     else if (h.indexOf("#/spend") === 0) name = "spend";
     else if (h.indexOf("#/savings") === 0) name = "savings";
+    else if (h.indexOf("#/approve") === 0) name = "approve";
+    else if (h.indexOf("#/reminders") === 0) name = "reminders";
     else if (h.indexOf("#/categories") === 0) name = "categories";
     else if (h.indexOf("#/settings") === 0) name = "settings";
     showView(name, focusHeading);
@@ -1992,6 +2096,12 @@
       reloaded = true;
       location.reload();
     });
+    navigator.serviceWorker.addEventListener("message", function (event) {
+      var data = event.data || {};
+      if (data.type === "openHash" && typeof data.hash === "string" && data.hash.indexOf("#/") === 0) {
+        location.hash = data.hash;
+      }
+    });
     navigator.serviceWorker.register("./sw.js").then(function (reg) {
       var kick = function (worker) {
         if (worker) worker.postMessage("skipWaiting");
@@ -2005,6 +2115,638 @@
         });
       });
     }).catch(function () {});
+  }
+
+
+  function normalizeTime(raw) {
+    var match = String(raw || "").trim().match(/^(\d{1,2}):(\d{2})/);
+    if (!match) return "";
+    var h = Number(match[1]);
+    var m = Number(match[2]);
+    if (h > 23 || m > 59) return "";
+    return pad(h) + ":" + pad(m);
+  }
+
+  function ordinalDay(n) {
+    var v = Math.abs(Number(n)) % 100;
+    var suffix = "th";
+    if (v < 11 || v > 13) {
+      if (v % 10 === 1) suffix = "st";
+      else if (v % 10 === 2) suffix = "nd";
+      else if (v % 10 === 3) suffix = "rd";
+    }
+    return String(n) + suffix;
+  }
+
+  function ymdFromDate(d) {
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  }
+
+  function monthKeyFromDate(d) {
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1);
+  }
+
+  function dueDateFor(year, monthIndex, dayOfMonth) {
+    var last = new Date(year, monthIndex + 1, 0).getDate();
+    var day = Math.min(Math.max(1, Number(dayOfMonth) || 1), last);
+    return new Date(year, monthIndex, day);
+  }
+
+  function optionalCents(raw) {
+    var s = String(raw == null ? "" : raw).trim();
+    if (!s) return { ok: true, cents: null };
+    var cents = parseCents(s);
+    if (cents == null) return { ok: false, cents: null };
+    return { ok: true, cents: cents };
+  }
+
+  function centsToInput(cents) {
+    if (cents == null) return "";
+    return (Number(cents) / 100).toFixed(2);
+  }
+
+  function unionHandled(a, b) {
+    var out = {};
+    [a || {}, b || {}].forEach(function (src) {
+      Object.keys(src).forEach(function (key) {
+        if (!/^\d{4}-\d{2}$/.test(key)) return;
+        if (src[key] === "approved" || src[key] === "skipped") out[key] = src[key];
+      });
+    });
+    return out;
+  }
+
+  function sanitizeReminder(raw) {
+    if (!raw || raw.id == null || String(raw.id) === "") return null;
+    var category = cleanCategoryName(raw.category).slice(0, 40);
+    if (!category) return null;
+    var day = Math.round(Number(raw.dayOfMonth != null ? raw.dayOfMonth : raw.day));
+    if (!day || day < 1 || day > 31) return null;
+    var before = Math.round(Number(raw.daysBefore));
+    if (!isFinite(before) || before < 0) before = 0;
+    if (before > 60) before = 60;
+    var time = normalizeTime(raw.time) || "09:00";
+    var who = raw.who === "Mitch" || raw.who === "Tonya" ? raw.who : "";
+    var cents = null;
+    if (raw.amountCents != null && raw.amountCents !== "") {
+      var n = Math.round(Number(raw.amountCents));
+      if (isFinite(n) && n > 0) cents = n;
+    } else if (raw.amount != null && raw.amount !== "") {
+      var dollars = Number(raw.amount);
+      if (isFinite(dollars) && dollars > 0) cents = Math.round(dollars * 100);
+    }
+    var created = "";
+    if (typeof raw.createdYMD === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.createdYMD)) created = raw.createdYMD;
+    else if (typeof raw.created === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.created)) created = raw.created;
+    return {
+      id: String(raw.id),
+      category: category,
+      amountCents: cents,
+      dayOfMonth: day,
+      daysBefore: before,
+      time: time,
+      who: who,
+      note: String(raw.note || "").slice(0, 200),
+      active: raw.active !== false,
+      handled: unionHandled(raw.handled, {}),
+      createdYMD: created,
+      synced: !!raw.synced
+    };
+  }
+
+  function loadReminders() {
+    try {
+      var list = JSON.parse(localStorage.getItem(KEY_REMINDERS) || "[]");
+      if (!Array.isArray(list)) return [];
+      return list.map(sanitizeReminder).filter(Boolean);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveReminders(list) {
+    localStorage.setItem(KEY_REMINDERS, JSON.stringify(list));
+  }
+
+  function findReminder(id) {
+    for (var i = 0; i < reminders.length; i++) {
+      if (reminders[i].id === id) return reminders[i];
+    }
+    return null;
+  }
+
+  function reminderOccurrences(reminder, now) {
+    var out = [];
+    if (!reminder || reminder.active === false) return out;
+    var time = normalizeTime(reminder.time) || "09:00";
+    var parts = time.split(":");
+    var hh = Number(parts[0]);
+    var mm = Number(parts[1]);
+    var before = Number(reminder.daysBefore) || 0;
+    if (before < 0) before = 0;
+    var handled = reminder.handled || {};
+    var createdMonth = reminder.createdYMD ? String(reminder.createdYMD).slice(0, 7) : "";
+    for (var offset = -1; offset <= 1; offset++) {
+      var base = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+      var due = dueDateFor(base.getFullYear(), base.getMonth(), reminder.dayOfMonth);
+      var key = monthKeyFromDate(due);
+      if (createdMonth && key < createdMonth) continue;
+      if (handled[key]) continue;
+      var start = new Date(due.getFullYear(), due.getMonth(), due.getDate(), hh, mm, 0, 0);
+      start.setDate(start.getDate() - before);
+      if (now.getTime() >= start.getTime()) {
+        out.push({ monthKey: key, dueYMD: ymdFromDate(due), dayOfMonth: reminder.dayOfMonth });
+      }
+    }
+    return out;
+  }
+
+  function reminderSyncPayload(reminder) {
+    return {
+      action: "saveReminder",
+      token: SHEET_SYNC_TOKEN,
+      id: reminder.id,
+      category: reminder.category,
+      amount: reminder.amountCents == null ? "" : dollarsFromCents(reminder.amountCents),
+      day: reminder.dayOfMonth,
+      daysBefore: reminder.daysBefore,
+      time: reminder.time,
+      who: reminder.who || "",
+      note: reminder.note || "",
+      active: reminder.active !== false,
+      handled: reminder.handled || {},
+      created: reminder.createdYMD || ""
+    };
+  }
+
+  function markReminderSynced(id) {
+    var found = false;
+    reminders.forEach(function (r) {
+      if (r && r.id === id) {
+        r.synced = true;
+        found = true;
+      }
+    });
+    if (found) {
+      try { saveReminders(reminders); } catch (err) {}
+    }
+  }
+
+  function syncReminder(reminder) {
+    if (!SHEET_SYNC_URL || !reminder) return;
+    postSync(reminderSyncPayload(reminder)).then(function (ok) {
+      if (!ok) return;
+      markReminderSynced(reminder.id);
+      flushSyncQueue();
+      pullSheet();
+    });
+  }
+
+  function syncDeleteReminder(id) {
+    if (!SHEET_SYNC_URL) return;
+    postSync({ action: "deleteReminder", token: SHEET_SYNC_TOKEN, id: id }).then(function (ok) {
+      if (!ok) return;
+      flushSyncQueue();
+      pullSheet();
+    });
+  }
+
+  function mergePulledReminders(remote) {
+    var tomb = {};
+    loadNameList(KEY_REMINDER_TOMB).forEach(function (id) { tomb[String(id)] = true; });
+    var byId = {};
+    reminders.forEach(function (r) { if (r && r.id) byId[r.id] = r; });
+    var seen = {};
+    var retry = [];
+    (remote || []).forEach(function (raw) {
+      var clean = sanitizeReminder(raw);
+      if (!clean) return;
+      clean.synced = true;
+      seen[clean.id] = true;
+      if (tomb[clean.id]) {
+        retry.push(clean.id);
+        return;
+      }
+      var local = byId[clean.id];
+      if (local && !local.synced) {
+        local.handled = unionHandled(local.handled, clean.handled);
+        if (!local.createdYMD && clean.createdYMD) local.createdYMD = clean.createdYMD;
+        return;
+      }
+      if (local) {
+        clean.handled = unionHandled(local.handled, clean.handled);
+        if (!clean.createdYMD && local.createdYMD) clean.createdYMD = local.createdYMD;
+      }
+      byId[clean.id] = clean;
+    });
+    var next = [];
+    Object.keys(byId).forEach(function (id) {
+      if (tomb[id]) return;
+      var item = byId[id];
+      if (item.synced && !seen[id]) return;
+      next.push(item);
+    });
+    reminders = next;
+    try { saveReminders(reminders); } catch (err) {}
+    var still = [];
+    Object.keys(tomb).forEach(function (id) { if (seen[id]) still.push(id); });
+    try { saveNameList(KEY_REMINDER_TOMB, still); } catch (err) {}
+    if (!sheetPullSkipped()) {
+      retry.forEach(function (id) {
+        postSync({ action: "deleteReminder", token: SHEET_SYNC_TOKEN, id: id });
+      });
+    }
+    var home = document.getElementById("view-home");
+    if (home && !home.hidden) renderHome();
+    var view = document.getElementById("view-reminders");
+    if (view && !view.hidden) renderReminderList();
+    checkReminders();
+  }
+
+  function markHandled(id, monthKey, status) {
+    var reminder = findReminder(id);
+    if (!reminder || !/^\d{4}-\d{2}$/.test(monthKey)) return;
+    if (!reminder.handled) reminder.handled = {};
+    reminder.handled[monthKey] = status;
+    reminder.synced = false;
+    try { saveReminders(reminders); } catch (err) {}
+    syncReminder(reminder);
+  }
+
+  function skipOccurrence(id, monthKey) {
+    markHandled(id, monthKey, "skipped");
+    var home = document.getElementById("view-home");
+    if (home && !home.hidden) renderHome();
+  }
+
+  function renderReminderChips(selected) {
+    var wrap = document.getElementById("rem-cat-chips");
+    wrap.textContent = "";
+    categories.forEach(function (name) {
+      var label = document.createElement("label");
+      label.className = "chip";
+      var input = document.createElement("input");
+      input.type = "radio";
+      input.name = "reminder-category";
+      input.value = name;
+      if (selected && selected === name) input.checked = true;
+      var span = document.createElement("span");
+      span.textContent = name;
+      label.appendChild(input);
+      label.appendChild(span);
+      wrap.appendChild(label);
+    });
+  }
+
+  function renderReminderList() {
+    var list = document.getElementById("reminder-list");
+    list.textContent = "";
+    if (!reminders.length) {
+      list.appendChild(el("p", "empty", "No reminders yet. Add one below."));
+      return;
+    }
+    reminders.forEach(function (r) {
+      var row = el("div", "cat-row");
+      var main = el("div", "entry-main");
+      var amt = r.amountCents == null ? "No amount yet" : formatUSD(r.amountCents);
+      var who = r.who ? " · " + r.who : "";
+      main.appendChild(el("div", "entry-title", r.category));
+      main.appendChild(el("div", "entry-meta", "Day " + r.dayOfMonth + " · " + r.daysBefore + " days before · " + r.time + " · " + amt + who));
+      if (r.note) main.appendChild(el("div", "entry-meta", r.note));
+      row.appendChild(main);
+      var actions = el("div", "row-actions");
+      var edit = el("button", "delete-btn", "Edit");
+      edit.type = "button";
+      edit.setAttribute("aria-label", "Edit reminder " + r.category);
+      edit.addEventListener("click", function () { fillReminderForm(r); });
+      var del = el("button", "delete-btn", "Delete");
+      del.type = "button";
+      del.setAttribute("aria-label", "Delete reminder " + r.category);
+      del.addEventListener("click", function () { deleteReminder(r.id); });
+      actions.appendChild(edit);
+      actions.appendChild(del);
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
+  }
+
+  function resetReminderForm() {
+    var form = document.getElementById("reminder-form");
+    form.reset();
+    document.getElementById("reminder-id").value = "";
+    document.getElementById("reminder-time").value = "09:00";
+    document.getElementById("reminder-error").textContent = "";
+    document.getElementById("reminder-days-custom").value = "";
+    var seven = document.querySelector('#reminder-days input[value="7"]');
+    if (seven) seven.checked = true;
+    document.getElementById("reminder-form-title").textContent = "Add reminder";
+    document.getElementById("reminder-save").textContent = "Save reminder";
+    renderReminderChips(null);
+  }
+
+  function fillReminderForm(r) {
+    resetReminderForm();
+    document.getElementById("reminder-id").value = r.id;
+    document.getElementById("reminder-form-title").textContent = "Edit reminder";
+    document.getElementById("reminder-save").textContent = "Save changes";
+    renderReminderChips(r.category);
+    if (!document.querySelector('#rem-cat-chips input[name="reminder-category"]:checked')) {
+      document.getElementById("reminder-new-cat").value = r.category;
+    }
+    document.getElementById("reminder-amount").value = centsToInput(r.amountCents);
+    document.getElementById("reminder-day").value = String(r.dayOfMonth);
+    document.getElementById("reminder-time").value = r.time;
+    document.getElementById("reminder-note").value = r.note || "";
+    var chip = document.querySelector('#reminder-days input[value="' + r.daysBefore + '"]');
+    if (chip) chip.checked = true;
+    else {
+      document.querySelectorAll('#reminder-days input').forEach(function (input) { input.checked = false; });
+      document.getElementById("reminder-days-custom").value = String(r.daysBefore);
+    }
+    if (r.who) {
+      var who = document.querySelector('#reminder-who-chips input[value="' + r.who + '"]');
+      if (who) who.checked = true;
+    }
+    document.getElementById("reminder-form-title").focus();
+  }
+
+  function openReminders() {
+    resetReminderForm();
+    renderReminderList();
+  }
+
+  function chosenDaysBefore() {
+    var custom = document.getElementById("reminder-days-custom").value.trim();
+    if (custom !== "") {
+      if (!/^\d+$/.test(custom)) return { ok: false, error: "Days before has to be a whole number." };
+      var n = Number(custom);
+      if (n > 60) return { ok: false, error: "Use 60 days or fewer." };
+      return { ok: true, days: n };
+    }
+    var chip = document.querySelector('#reminder-days input[name="days-before"]:checked');
+    if (!chip) return { ok: false, error: "Choose how many days before, or type a number." };
+    return { ok: true, days: Number(chip.value) };
+  }
+
+  function onReminderSubmit(ev) {
+    ev.preventDefault();
+    if (saving) return;
+    var err = document.getElementById("reminder-error");
+    err.textContent = "";
+    var picked = document.querySelector('#rem-cat-chips input[name="reminder-category"]:checked');
+    var typed = cleanCategoryName(document.getElementById("reminder-new-cat").value);
+    var category = picked ? picked.value : "";
+    if (typed) {
+      var added = addCategory(typed);
+      if (!added.ok) { err.textContent = added.error; return; }
+      category = added.name;
+      renderReminderChips(category);
+    }
+    if (!category) { err.textContent = "Choose a category or type one."; return; }
+    var money = optionalCents(document.getElementById("reminder-amount").value);
+    if (!money.ok) { err.textContent = "Amount has to be more than zero, or leave it blank."; return; }
+    var dayRaw = document.getElementById("reminder-day").value.trim();
+    if (!/^\d+$/.test(dayRaw)) { err.textContent = "Day of the month has to be from 1 to 31."; return; }
+    var day = Number(dayRaw);
+    if (day < 1 || day > 31) { err.textContent = "Day of the month has to be from 1 to 31."; return; }
+    var days = chosenDaysBefore();
+    if (!days.ok) { err.textContent = days.error; return; }
+    var time = normalizeTime(document.getElementById("reminder-time").value);
+    if (!time) { err.textContent = "Choose a time of day."; return; }
+    var whoEl = document.querySelector('#reminder-who-chips input[name="reminder-who"]:checked');
+    var who = whoEl ? whoEl.value : "";
+    var note = document.getElementById("reminder-note").value.trim().slice(0, 200);
+    var existingId = document.getElementById("reminder-id").value;
+    var first = !loadReminders().length && !existingId;
+    saving = true;
+    try {
+      var reminder;
+      if (existingId) {
+        reminder = findReminder(existingId);
+        if (!reminder) { err.textContent = "That reminder is gone. Add it again."; return; }
+        reminder.category = category;
+        reminder.amountCents = money.cents;
+        reminder.dayOfMonth = day;
+        reminder.daysBefore = days.days;
+        reminder.time = time;
+        reminder.who = who;
+        reminder.note = note;
+        reminder.active = true;
+        reminder.synced = false;
+      } else {
+        reminder = {
+          id: newId(),
+          category: category,
+          amountCents: money.cents,
+          dayOfMonth: day,
+          daysBefore: days.days,
+          time: time,
+          who: who,
+          note: note,
+          active: true,
+          handled: {},
+          createdYMD: todayYMD(),
+          synced: false
+        };
+        reminders.push(reminder);
+      }
+      saveReminders(reminders);
+      syncReminder(reminder);
+      if (first) maybeAskNotify();
+      resetReminderForm();
+      renderReminderList();
+      checkReminders();
+    } catch (e) {
+      err.textContent = "This phone blocked saving. Free some space and try again.";
+    } finally {
+      saving = false;
+    }
+  }
+
+  function deleteReminder(id) {
+    var reminder = findReminder(id);
+    if (!reminder) return;
+    if (!confirm('Delete the ' + reminder.category + ' reminder? This does not delete spending you already approved.')) return;
+    reminders = reminders.filter(function (r) { return r.id !== id; });
+    saveReminders(reminders);
+    var tomb = loadNameList(KEY_REMINDER_TOMB);
+    if (tomb.indexOf(id) === -1) tomb.push(id);
+    saveNameList(KEY_REMINDER_TOMB, tomb);
+    syncDeleteReminder(id);
+    renderReminderList();
+    checkReminders();
+  }
+
+  function renderDueBanners() {
+    var box = document.getElementById("due-list");
+    if (!box) return;
+    box.textContent = "";
+    var now = new Date();
+    var any = false;
+    reminders.forEach(function (r) {
+      reminderOccurrences(r, now).forEach(function (occ) {
+        any = true;
+        var card = el("section", "due-card");
+        card.appendChild(el("h2", "", r.category || "Bill"));
+        var amt = r.amountCents == null ? "Amount not set" : formatUSD(r.amountCents);
+        card.appendChild(el("p", "due-line", amt + " · due " + formatEntryDate(occ.dueYMD)));
+        card.appendChild(el("p", "hint", "Not saved until you tap Approve. You can change the date."));
+        var actions = el("div", "due-actions");
+        var approve = el("button", "btn btn-primary", "Approve");
+        approve.type = "button";
+        approve.addEventListener("click", function () {
+          location.hash = "#/approve?id=" + encodeURIComponent(r.id) + "&month=" + encodeURIComponent(occ.monthKey);
+        });
+        var skip = el("button", "btn", "Not this time");
+        skip.type = "button";
+        skip.addEventListener("click", function () { skipOccurrence(r.id, occ.monthKey); });
+        actions.appendChild(approve);
+        actions.appendChild(skip);
+        card.appendChild(actions);
+        box.appendChild(card);
+      });
+    });
+    box.hidden = !any;
+  }
+
+  function hashQuery(h) {
+    var out = {};
+    var i = String(h || "").indexOf("?");
+    if (i < 0) return out;
+    String(h).slice(i + 1).split("&").forEach(function (part) {
+      var bits = part.split("=");
+      var key = decodeURIComponent(bits[0] || "");
+      if (!key) return;
+      out[key] = decodeURIComponent(bits.slice(1).join("=") || "");
+    });
+    return out;
+  }
+
+  function openApprove() {
+    var q = hashQuery(location.hash);
+    var reminder = findReminder(q.id);
+    var err = document.getElementById("approve-error");
+    err.textContent = "";
+    approveTarget = null;
+    if (!reminder || !/^\d{4}-\d{2}$/.test(q.month || "")) {
+      document.getElementById("approve-title").textContent = "Approve";
+      document.getElementById("approve-sub").textContent = "That reminder is not waiting anymore.";
+      document.getElementById("approve-form").hidden = true;
+      return;
+    }
+    var parts = q.month.split("-");
+    var due = dueDateFor(Number(parts[0]), Number(parts[1]) - 1, reminder.dayOfMonth);
+    var dueYMD = ymdFromDate(due);
+    approveTarget = { id: reminder.id, monthKey: q.month, dueYMD: dueYMD };
+    document.getElementById("approve-form").hidden = false;
+    document.getElementById("approve-title").textContent = "Approve " + reminder.category;
+    document.getElementById("approve-sub").textContent = reminder.category + " is due on the " + ordinalDay(reminder.dayOfMonth) + ". This is not saved until you tap Approve. Change the date if you pay on a different day.";
+    document.getElementById("approve-date").value = dueYMD;
+    document.getElementById("approve-amount").value = centsToInput(reminder.amountCents);
+    document.getElementById("approve-note").value = reminder.note || "";
+  }
+
+  function onApproveSubmit(ev) {
+    ev.preventDefault();
+    if (saving) return;
+    var err = document.getElementById("approve-error");
+    err.textContent = "";
+    if (!approveTarget) { err.textContent = "That reminder is not waiting anymore."; return; }
+    var reminder = findReminder(approveTarget.id);
+    if (!reminder) { err.textContent = "That reminder is not waiting anymore."; return; }
+    var date = document.getElementById("approve-date").value;
+    var cents = parseCents(document.getElementById("approve-amount").value);
+    var note = document.getElementById("approve-note").value.trim().slice(0, 200);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { err.textContent = "Choose a date."; return; }
+    if (cents == null) { err.textContent = "Enter an amount more than zero."; document.getElementById("approve-amount").focus(); return; }
+    saving = true;
+    try {
+      var entry = {
+        id: newId(),
+        type: "spending",
+        date: date,
+        category: reminder.category,
+        amountCents: cents,
+        note: note,
+        createdAt: new Date().toISOString(),
+        hasPhoto: false,
+        receiptName: ""
+      };
+      entries.push(entry);
+      saveEntries(entries);
+      if (!findCategory(reminder.category)) {
+        addCategory(reminder.category);
+      }
+      syncEntry(entry);
+      markHandled(reminder.id, approveTarget.monthKey, "approved");
+      location.hash = "#/";
+    } catch (e) {
+      entries.pop();
+      err.textContent = "This phone blocked saving. Free some space and try again.";
+    } finally {
+      saving = false;
+    }
+  }
+
+  function maybeAskNotify() {
+    try {
+      if (!window.Notification || typeof Notification.requestPermission !== "function") return;
+      if (Notification.permission !== "default") return;
+      if (localStorage.getItem(KEY_NOTIFY_ASKED) === "1") return;
+      localStorage.setItem(KEY_NOTIFY_ASKED, "1");
+      var pending = Notification.requestPermission();
+      if (pending && typeof pending.catch === "function") pending.catch(function () {});
+    } catch (e) {}
+  }
+
+  function notificationText(reminder) {
+    return (reminder.category || "Bill") + " is due on the " + ordinalDay(reminder.dayOfMonth);
+  }
+
+  function showReminderNotification(reminder, occ) {
+    var title = notificationText(reminder);
+    var hash = "#/approve?id=" + encodeURIComponent(reminder.id) + "&month=" + encodeURIComponent(occ.monthKey);
+    var options = {
+      body: "Tap to approve. It is not saved until you do.",
+      tag: "hm-reminder-" + reminder.id + "-" + occ.monthKey,
+      data: { hash: hash }
+    };
+    // Reliable path: this runs when the page is open (on load and on a timer).
+    // There is no push subscription. If the phone has the app fully closed, nothing here wakes it.
+    if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+      navigator.serviceWorker.ready.then(function (reg) {
+        if (reg && reg.showNotification) return reg.showNotification(title, options);
+        fallbackNotify(title, hash);
+      }).catch(function () { fallbackNotify(title, hash); });
+      return;
+    }
+    fallbackNotify(title, hash);
+  }
+
+  function fallbackNotify(title, hash) {
+    try {
+      var n = new Notification(title);
+      n.onclick = function () {
+        window.focus();
+        location.hash = hash;
+        n.close();
+      };
+    } catch (e) {}
+  }
+
+  function checkReminders() {
+    var home = document.getElementById("view-home");
+    if (home && !home.hidden) renderDueBanners();
+    if (!window.Notification || Notification.permission !== "granted") return;
+    var now = new Date();
+    reminders.forEach(function (r) {
+      reminderOccurrences(r, now).forEach(function (occ) {
+        var key = r.id + "|" + occ.monthKey;
+        if (notifiedKeys[key]) return;
+        notifiedKeys[key] = true;
+        showReminderNotification(r, occ);
+      });
+    });
   }
 
   function bind() {
@@ -2030,6 +2772,22 @@
       err.textContent = result.already ? "Already on the list. It's selected." : "";
       input.value = "";
       renderCategoryChips(result.name);
+    });
+    document.getElementById("reminder-form").addEventListener("submit", onReminderSubmit);
+    document.getElementById("reminder-add-cat").addEventListener("click", function () {
+      var input = document.getElementById("reminder-new-cat");
+      var err = document.getElementById("reminder-error");
+      var result = addCategory(input.value);
+      if (!result.ok) { err.textContent = result.error; return; }
+      err.textContent = result.already ? "Already on the list. It's selected." : "";
+      input.value = "";
+      renderReminderChips(result.name);
+    });
+    document.getElementById("approve-form").addEventListener("submit", onApproveSubmit);
+    document.getElementById("approve-skip").addEventListener("click", function () {
+      if (!approveTarget) return;
+      skipOccurrence(approveTarget.id, approveTarget.monthKey);
+      location.hash = "#/";
     });
     document.getElementById("cat-add-form").addEventListener("submit", function (ev) {
       ev.preventDefault();
@@ -2060,12 +2818,18 @@
 
   entries = loadEntries();
   categories = loadCategories();
+  reminders = loadReminders();
   seedLearned();
   bind();
   route(false);
   registerSW();
   flushSyncQueue();
   pullSheet();
+  checkReminders();
+  setInterval(checkReminders, 60000);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") checkReminders();
+  });
 
   window.HM = {
     summarize: summarize,
@@ -2078,7 +2842,9 @@
     guessCategory: guessCategory,
     extractAmount: extractAmount,
     mergeCategoryLists: mergeCategoryLists,
-    savingsAndLeftover: savingsAndLeftover
+    savingsAndLeftover: savingsAndLeftover,
+    reminderOccurrences: reminderOccurrences,
+    ordinalDay: ordinalDay
   };
 })();
   </script>

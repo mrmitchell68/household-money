@@ -1,8 +1,11 @@
 /* Household Money service worker.
-   cache-bust: hm-v1.6.0
+   cache-bust: hm-v1.7.0
    A service worker cannot network-first its own script. Bump VERSION to refresh the shell.
-   The page posts "skipWaiting" so an update takes control. This file is not put in the cache. */
-const VERSION = "hm-v1.6.0";
+   The page posts "skipWaiting" so an update takes control. This file is not put in the cache.
+   Bill reminders are checked while the page is open (on load and on a timer). There is no
+   push subscription. If the phone has the app fully closed, this worker does not wake up
+   to notify. notificationclick only runs after a notification was already shown. */
+const VERSION = "hm-v1.7.0";
 const SHELL_CACHE = VERSION + "-shell";
 const SHELL = [
   "./",
@@ -85,5 +88,23 @@ self.addEventListener("fetch", (event) => {
       return cached;
     }
     return (await network) || new Response("", { status: 504 });
+  })());
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  const hash = typeof data.hash === "string" && data.hash.indexOf("#/") === 0 ? data.hash : "#/";
+  event.waitUntil((async () => {
+    const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of list) {
+      if (client.url.indexOf(self.registration.scope) !== 0) continue;
+      client.postMessage({ type: "openHash", hash: hash });
+      if ("focus" in client) return client.focus();
+    }
+    if (self.clients.openWindow) {
+      const url = new URL("./index.html" + hash, self.registration.scope);
+      return self.clients.openWindow(url.href);
+    }
   })());
 });
