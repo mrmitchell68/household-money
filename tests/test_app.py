@@ -39,7 +39,9 @@ def main():
     assert "the sheet stores the receipt file name" in html
     assert "sent when you open the app online again" in html
     assert "this phone remembers which category you used for that store" in html
-    assert "hm-v1.7.2" in (ROOT / "sw.js").read_text()
+    assert "hm-v1.7.3" in (ROOT / "sw.js").read_text()
+    assert "Remind me each month" in html
+    assert 'id="spend-remind"' in html
     assert "Save reminder" in html
     assert 'id="reminder-status"' in html
     assert "Day of the month has to be from 1 to 31." in html
@@ -426,6 +428,63 @@ def main():
         assert skipped["count"] == before_n + 1
         assert skipped["skipNotes"] == 0
         assert skipped["handled"] == "skipped"
+
+        posts = []
+        page.on("request", lambda req: posts.append(req.url) if "script.google.com" in req.url or "google.com/macros" in req.url else None)
+        page.locator("#go-spend").click()
+        page.wait_for_selector("#spend-form")
+        assert page.locator("#spend-remind-fields").is_hidden()
+        page.locator("#spend-date").fill("2026-10-01")
+        page.locator("#cat-chips label.chip", has_text="Mortgage").click()
+        page.locator("#spend-amount").fill("1200")
+        page.locator("#spend-note").fill("october mortgage")
+        page.locator("#spend-remind").check()
+        page.wait_for_selector("#spend-remind-fields:not([hidden])")
+        assert page.locator('#spend-reminder-days input[value="7"]').is_checked()
+        page.locator("#spend-remind-time").fill("")
+        page.locator("#spend-save").click()
+        page.wait_for_function("() => location.hash === '#/' && document.querySelector('#home-status').textContent.includes('Monthly reminder saved.')")
+        kept_spend = page.evaluate("""() => {
+          const entries = JSON.parse(localStorage.getItem('householdMoney.entries.v1'));
+          const spend = entries.find(e => e.note === 'october mortgage');
+          const before = JSON.parse(localStorage.getItem('hm.reminders.v1'));
+          const saved = before.find(r => r.category === 'Mortgage' && r.dayOfMonth === 1 && r.note === 'october mortgage');
+          if (!spend || !saved || saved.synced) return { ok: false, spend: !!spend, saved: saved || null };
+          HM.mergePulledReminders([]);
+          const afterEmpty = JSON.parse(localStorage.getItem('hm.reminders.v1'));
+          const still = afterEmpty.find(r => r.id === saved.id);
+          const queue = JSON.parse(localStorage.getItem('hm.syncQueue') || '[]');
+          return {
+            ok: true,
+            spendDate: spend.date,
+            spendCat: spend.category,
+            spendCents: spend.amountCents,
+            spendSynced: !!spend.synced,
+            day: still && still.dayOfMonth,
+            daysBefore: still && still.daysBefore,
+            time: still && still.time,
+            amount: still && still.amountCents,
+            note: still && still.note,
+            synced: still && still.synced,
+            kept: !!still,
+            queued: queue.some(item => item && (item.id === saved.id || item.id === spend.id || item.note === 'october mortgage'))
+          };
+        }""")
+        print("SPEND_REMINDER", kept_spend, "POSTS", posts)
+        assert posts == []
+        assert kept_spend["ok"] is True
+        assert kept_spend["spendDate"] == "2026-10-01"
+        assert kept_spend["spendCat"] == "Mortgage"
+        assert kept_spend["spendCents"] == 120000
+        assert kept_spend["spendSynced"] is not True
+        assert kept_spend["kept"] is True
+        assert kept_spend["day"] == 1
+        assert kept_spend["daysBefore"] == 7
+        assert kept_spend["time"] == "09:00"
+        assert kept_spend["amount"] == 120000
+        assert kept_spend["note"] == "october mortgage"
+        assert kept_spend["synced"] is False
+        assert kept_spend["queued"] is False
         browser.close()
     print("PASS")
 

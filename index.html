@@ -145,6 +145,20 @@
     }
     .chip:has(input:focus-visible) { outline: 3px solid var(--gold); outline-offset: 2px; }
     .hint { color: var(--muted); font-size: 0.95rem; margin: 8px 0 0; }
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 52px;
+      margin-top: 14px;
+      font-weight: 750;
+    }
+    .check-row input {
+      width: 28px;
+      height: 28px;
+      margin: 0;
+      accent-color: var(--green);
+    }
     .add-row { display: flex; gap: 8px; align-items: center; }
     .add-row input { flex: 1; }
     .btn {
@@ -276,6 +290,7 @@
   <div class="wrap">
     <div id="view-home">
       <div id="due-list" aria-live="polite"></div>
+      <p class="hint" id="home-status" aria-live="polite"></p>
       <section class="panel" aria-labelledby="week-title">
         <h1 id="week-title">This week</h1>
         <p class="sub" id="week-range">Monday through today</p>
@@ -342,6 +357,24 @@
       <form id="spend-form" autocomplete="off">
         <label class="field" for="spend-date">Date</label>
         <input id="spend-date" name="date" type="date" required>
+        <label class="check-row" for="spend-remind">
+          <input id="spend-remind" type="checkbox">
+          <span>Remind me each month</span>
+        </label>
+        <div id="spend-remind-fields" hidden>
+          <fieldset>
+            <legend>Remind this many days before</legend>
+            <div class="chips" id="spend-reminder-days">
+              <label class="chip"><input type="radio" name="spend-days-before" value="7" checked> 7 days</label>
+              <label class="chip"><input type="radio" name="spend-days-before" value="3"> 3 days</label>
+              <label class="chip"><input type="radio" name="spend-days-before" value="1"> 1 day</label>
+            </div>
+            <label class="field" for="spend-days-custom">Custom days before</label>
+            <input id="spend-days-custom" type="number" inputmode="numeric" min="0" max="60" step="1" placeholder="Or type a number, including 0">
+          </fieldset>
+          <label class="field" for="spend-remind-time">Time of day</label>
+          <input id="spend-remind-time" type="time" value="09:00">
+        </div>
         <fieldset>
           <legend>Category</legend>
           <div class="chips" id="cat-chips"></div>
@@ -550,6 +583,7 @@
   var entries = [];
   var categories = [];
   var reminders = [];
+  var pendingHomeNote = "";
   var notifiedKeys = {};
   var approveTarget = null;
   var spendPhoto = null;
@@ -1737,7 +1771,15 @@
     document.getElementById("spend-error").textContent = "";
     document.getElementById("spend-new-cat").value = "";
     setReceiptHint("");
+    syncSpendRemindFields();
     renderCategoryChips(null);
+  }
+
+  function syncSpendRemindFields() {
+    var box = document.getElementById("spend-remind-fields");
+    var boxOn = document.getElementById("spend-remind");
+    if (!box || !boxOn) return;
+    box.hidden = !boxOn.checked;
   }
 
   function showView(name, focusHeading) {
@@ -1745,7 +1787,12 @@
       document.getElementById("view-" + view).hidden = view !== name;
     });
     document.body.classList.toggle("with-dock", name === "home");
-    if (name === "home") renderHome();
+    if (name === "home") {
+      renderHome();
+      var homeNote = document.getElementById("home-status");
+      if (homeNote) homeNote.textContent = pendingHomeNote;
+      pendingHomeNote = "";
+    }
     if (name === "income") openIncome();
     if (name === "spend") openSpend();
     if (name === "savings") openSavings();
@@ -1864,6 +1911,16 @@
     if (!picked) { err.textContent = "Choose a category."; return; }
     if (!date) { err.textContent = "Choose a date."; return; }
     if (cents == null) { err.textContent = "Enter an amount more than zero."; document.getElementById("spend-amount").focus(); return; }
+    var remindOn = document.getElementById("spend-remind").checked;
+    var remindDays = null;
+    var remindTime = "09:00";
+    if (remindOn) {
+      remindDays = readDaysBefore("spend-days-custom", '#spend-reminder-days input[name="spend-days-before"]:checked');
+      if (!remindDays.ok) { err.textContent = remindDays.error; return; }
+      var timeRaw = document.getElementById("spend-remind-time").value.trim();
+      remindTime = timeRaw ? normalizeTime(timeRaw) : "09:00";
+      if (!remindTime) { err.textContent = "Choose a time of day."; return; }
+    }
     saving = true;
     var btn = document.getElementById("spend-save");
     btn.disabled = true;
@@ -1896,6 +1953,19 @@
         saveEntries(entries);
         rememberSpend(note, picked.value, photo && photo.merchant);
         syncEntry(entry);
+        if (remindOn) {
+          saveSpendReminder({
+            category: picked.value,
+            amountCents: cents,
+            dayOfMonth: Number(date.slice(8, 10)),
+            daysBefore: remindDays.days,
+            time: remindTime,
+            note: note
+          });
+          pendingHomeNote = "Monthly reminder saved.";
+        } else {
+          pendingHomeNote = "";
+        }
         location.hash = "#/";
       });
     }).catch(function () {
@@ -2521,17 +2591,66 @@
     renderReminderList();
   }
 
-  function chosenDaysBefore() {
-    var custom = document.getElementById("reminder-days-custom").value.trim();
+  function readDaysBefore(customId, chipSelector) {
+    var custom = document.getElementById(customId).value.trim();
     if (custom !== "") {
       if (!/^\d+$/.test(custom)) return { ok: false, error: "Days before has to be a whole number." };
       var n = Number(custom);
       if (n > 60) return { ok: false, error: "Use 60 days or fewer." };
       return { ok: true, days: n };
     }
-    var chip = document.querySelector('#reminder-days input[name="days-before"]:checked');
+    var chip = document.querySelector(chipSelector);
     if (!chip) return { ok: false, error: "Choose how many days before, or type a number." };
     return { ok: true, days: Number(chip.value) };
+  }
+
+  function chosenDaysBefore() {
+    return readDaysBefore("reminder-days-custom", '#reminder-days input[name="days-before"]:checked');
+  }
+
+  function findReminderByCategoryDay(category, day) {
+    for (var i = 0; i < reminders.length; i++) {
+      var item = reminders[i];
+      if (item && item.category === category && item.dayOfMonth === day) return item;
+    }
+    return null;
+  }
+
+  function saveSpendReminder(opts) {
+    var existing = findReminderByCategoryDay(opts.category, opts.dayOfMonth);
+    var first = !existing && reminders.length === 0;
+    var reminder = existing;
+    if (!reminder) {
+      reminder = {
+        id: newId(),
+        category: opts.category,
+        amountCents: opts.amountCents,
+        dayOfMonth: opts.dayOfMonth,
+        daysBefore: opts.daysBefore,
+        time: opts.time,
+        who: "",
+        note: opts.note || "",
+        active: true,
+        handled: {},
+        createdYMD: todayYMD(),
+        synced: false
+      };
+      reminders.push(reminder);
+    } else {
+      reminder.category = opts.category;
+      reminder.amountCents = opts.amountCents;
+      reminder.dayOfMonth = opts.dayOfMonth;
+      reminder.daysBefore = opts.daysBefore;
+      reminder.time = opts.time;
+      if (opts.note) reminder.note = opts.note;
+      reminder.active = true;
+      reminder.synced = false;
+    }
+    saveReminders(reminders);
+    syncReminder(reminder);
+    if (first) maybeAskNotify();
+    checkReminders();
+    return reminder;
   }
 
   function onReminderSubmit(ev) {
@@ -2806,6 +2925,7 @@
     document.getElementById("go-savings").addEventListener("click", function () { location.hash = "#/savings"; });
     document.getElementById("income-form").addEventListener("submit", onIncomeSubmit);
     document.getElementById("spend-form").addEventListener("submit", onSpendSubmit);
+    document.getElementById("spend-remind").addEventListener("change", syncSpendRemindFields);
     document.getElementById("savings-form").addEventListener("submit", onSavingsSubmit);
     document.getElementById("spend-camera").addEventListener("change", function (ev) {
       var file = ev.target.files && ev.target.files[0];
