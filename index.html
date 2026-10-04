@@ -625,6 +625,8 @@
   var fullUrl = null;
   var thumbUrls = [];
   var saving = false;
+  var editingEntryId = "";
+  var keptReceiptUrl = null;
 
   function pad(n) { return String(n).padStart(2, "0"); }
 
@@ -1395,11 +1397,21 @@
     if (e.note) meta += " · " + e.note;
     main.appendChild(el("div", "entry-meta", meta));
     if (e.receiptName) main.appendChild(el("div", "receipt-name", e.receiptName));
+    var actions = el("div", "row-actions");
+    var edit = el("button", "delete-btn", "Edit");
+    edit.type = "button";
+    edit.setAttribute("aria-label", "Edit " + title + " " + formatUSD(e.amountCents));
+    edit.addEventListener("click", function () {
+      var path = e.type === "income" ? "income" : (e.type === "savings" ? "savings" : "spend");
+      location.hash = "#/" + path + "/" + encodeURIComponent(e.id);
+    });
     var del = el("button", "delete-btn", "Delete");
     del.type = "button";
     del.setAttribute("aria-label", "Delete " + title + " " + formatUSD(e.amountCents));
     del.addEventListener("click", function () { deleteEntry(e.id); });
-    main.appendChild(del);
+    actions.appendChild(edit);
+    actions.appendChild(del);
+    main.appendChild(actions);
     row.appendChild(main);
     var amtClass = "in";
     var amtCents = e.amountCents;
@@ -1433,7 +1445,9 @@
   function renderCategoryChips(selected) {
     var wrap = document.getElementById("cat-chips");
     wrap.textContent = "";
-    categories.forEach(function (name, i) {
+    var names = categories.slice();
+    if (selected && names.indexOf(selected) === -1) names.unshift(selected);
+    names.forEach(function (name, i) {
       var label = el("label", "chip");
       var input = document.createElement("input");
       input.type = "radio";
@@ -1775,36 +1789,150 @@
     photoToken += 1;
     if (spendPhoto && spendPhoto.previewUrl) URL.revokeObjectURL(spendPhoto.previewUrl);
     spendPhoto = null;
+    if (keptReceiptUrl) {
+      URL.revokeObjectURL(keptReceiptUrl);
+      keptReceiptUrl = null;
+    }
     var wrap = document.getElementById("photo-preview-wrap");
     wrap.hidden = true;
-    document.getElementById("photo-preview").removeAttribute("src");
+    var img = document.getElementById("photo-preview");
+    img.hidden = false;
+    img.removeAttribute("src");
     document.getElementById("photo-filename").textContent = "";
     setReceiptHint("");
   }
 
+  function hashEditId(kind) {
+    var h = location.hash || "";
+    var prefix = "#/" + kind + "/";
+    if (h.indexOf(prefix) !== 0) return "";
+    var rest = h.slice(prefix.length).split(/[?#]/)[0];
+    if (!rest) return "";
+    try { return decodeURIComponent(rest); } catch (err) { return rest; }
+  }
+
+  function findEntry(id) {
+    var found = null;
+    entries.forEach(function (item) {
+      if (item && item.id === id) found = item;
+    });
+    return found;
+  }
+
+  function centsToInput(cents) {
+    return (Math.abs(Number(cents) || 0) / 100).toFixed(2);
+  }
+
+  function entryForEdit(kind) {
+    var id = hashEditId(kind);
+    if (!id) return null;
+    var entry = findEntry(id);
+    var type = kind === "spend" ? "spending" : kind;
+    if (!entry || entry.type !== type) return null;
+    return entry;
+  }
+
+  function showKeptReceipt(entry) {
+    var name = entry && entry.receiptName ? entry.receiptName : "";
+    if (!name && !(entry && entry.hasPhoto)) return;
+    document.getElementById("photo-filename").textContent = name;
+    document.getElementById("photo-preview-wrap").hidden = false;
+    var img = document.getElementById("photo-preview");
+    if (!entry.hasPhoto) {
+      img.hidden = true;
+      return;
+    }
+    var token = photoToken;
+    var id = entry.id;
+    idbGet(id).then(function (rec) {
+      if (token !== photoToken || editingEntryId !== id) return;
+      if (!rec || !rec.blob) {
+        img.hidden = true;
+        return;
+      }
+      if (keptReceiptUrl) URL.revokeObjectURL(keptReceiptUrl);
+      keptReceiptUrl = URL.createObjectURL(rec.blob);
+      img.src = keptReceiptUrl;
+      img.hidden = false;
+    }).catch(function () {});
+  }
+
   function openIncome() {
     document.getElementById("income-form").reset();
-    document.getElementById("income-date").value = todayYMD();
     document.getElementById("income-error").textContent = "";
+    var existing = entryForEdit("income");
+    var title = document.querySelector("#view-income h2");
+    if (!existing) {
+      editingEntryId = "";
+      document.getElementById("income-date").value = todayYMD();
+      document.getElementById("income-save").textContent = "Save";
+      if (title) title.textContent = "Add income";
+      return;
+    }
+    editingEntryId = existing.id;
+    document.getElementById("income-date").value = existing.date;
+    var who = document.querySelector('#who-chips input[name="who"][value="' + existing.who + '"]');
+    if (who) who.checked = true;
+    document.getElementById("income-amount").value = centsToInput(existing.amountCents);
+    document.getElementById("income-note").value = existing.note || "";
+    document.getElementById("income-save").textContent = "Save changes";
+    if (title) title.textContent = "Change income";
   }
 
   function openSavings() {
     document.getElementById("savings-form").reset();
-    document.getElementById("savings-date").value = todayYMD();
     document.getElementById("savings-error").textContent = "";
     var aside = document.querySelector('input[name="savings-way"][value="aside"]');
     if (aside) aside.checked = true;
+    var existing = entryForEdit("savings");
+    var title = document.querySelector("#view-savings h2");
+    if (!existing) {
+      editingEntryId = "";
+      document.getElementById("savings-date").value = todayYMD();
+      document.getElementById("savings-save").textContent = "Save";
+      if (title) title.textContent = "Add savings";
+      return;
+    }
+    editingEntryId = existing.id;
+    document.getElementById("savings-date").value = existing.date;
+    var who = document.querySelector('#savings-who-chips input[name="savings-who"][value="' + existing.who + '"]');
+    if (who) who.checked = true;
+    var way = document.querySelector('input[name="savings-way"][value="' + (existing.amountCents < 0 ? "out" : "aside") + '"]');
+    if (way) way.checked = true;
+    document.getElementById("savings-amount").value = centsToInput(existing.amountCents);
+    document.getElementById("savings-note").value = existing.note || "";
+    document.getElementById("savings-save").textContent = "Save changes";
+    if (title) title.textContent = "Change savings";
   }
 
   function openSpend() {
     clearSpendPhoto();
     document.getElementById("spend-form").reset();
-    document.getElementById("spend-date").value = todayYMD();
     document.getElementById("spend-error").textContent = "";
     document.getElementById("spend-new-cat").value = "";
     setReceiptHint("");
+    var existing = entryForEdit("spend");
+    var title = document.querySelector("#view-spend h2");
+    if (!existing) {
+      editingEntryId = "";
+      document.getElementById("spend-date").value = todayYMD();
+      document.getElementById("spend-save").textContent = "Save";
+      if (title) title.textContent = "Add spending";
+      document.getElementById("spend-remind").checked = false;
+      syncSpendRemindFields();
+      renderCategoryChips(null);
+      return;
+    }
+    editingEntryId = existing.id;
+    document.getElementById("spend-date").value = existing.date;
+    document.getElementById("spend-amount").value = centsToInput(existing.amountCents);
+    document.getElementById("spend-note").value = existing.note || "";
+    document.getElementById("spend-save").textContent = "Save changes";
+    if (title) title.textContent = "Change spending";
+    document.getElementById("spend-remind").checked = false;
     syncSpendRemindFields();
-    renderCategoryChips(null);
+    renderCategoryChips(existing.category);
+    showKeptReceipt(existing);
   }
 
   function syncSpendRemindFields() {
@@ -1820,6 +1948,7 @@
     });
     document.body.classList.toggle("with-dock", name === "home");
     if (name === "home") {
+      editingEntryId = "";
       renderHome();
       var homeNote = document.getElementById("home-status");
       if (homeNote) homeNote.textContent = pendingHomeNote;
@@ -1838,6 +1967,11 @@
         head.focus();
       }
     }
+  }
+
+  function goHome() {
+    if (location.hash !== "#/") location.hash = "#/";
+    route(true);
   }
 
   function route(focusHeading) {
@@ -1865,25 +1999,51 @@
     if (!who) { err.textContent = "Choose Mitch or Tonya."; return; }
     if (!date) { err.textContent = "Choose a date."; return; }
     if (cents == null) { err.textContent = "Enter an amount more than zero."; document.getElementById("income-amount").focus(); return; }
+    var existing = editingEntryId ? findEntry(editingEntryId) : null;
+    if (existing && existing.type !== "income") existing = null;
     saving = true;
     try {
-      var entry = {
-        id: newId(),
-        type: "income",
-        date: date,
-        who: who.value,
-        amountCents: cents,
-        note: note,
-        createdAt: new Date().toISOString(),
-        hasPhoto: false,
-        receiptName: ""
-      };
-      entries.push(entry);
-      saveEntries(entries);
-      syncEntry(entry);
-      location.hash = "#/";
+      if (existing) {
+        var prev = { date: existing.date, who: existing.who, amountCents: existing.amountCents, note: existing.note, synced: existing.synced };
+        existing.date = date;
+        existing.who = who.value;
+        existing.amountCents = cents;
+        existing.note = note;
+        existing.synced = false;
+        try {
+          saveEntries(entries);
+        } catch (errSave) {
+          existing.date = prev.date;
+          existing.who = prev.who;
+          existing.amountCents = prev.amountCents;
+          existing.note = prev.note;
+          existing.synced = prev.synced;
+          throw errSave;
+        }
+        syncEntry(existing);
+      } else {
+        var entry = {
+          id: newId(),
+          type: "income",
+          date: date,
+          who: who.value,
+          amountCents: cents,
+          note: note,
+          createdAt: new Date().toISOString(),
+          hasPhoto: false,
+          receiptName: ""
+        };
+        entries.push(entry);
+        try {
+          saveEntries(entries);
+        } catch (errSave) {
+          entries.pop();
+          throw errSave;
+        }
+        syncEntry(entry);
+      }
+      goHome();
     } catch (e) {
-      entries.pop();
       err.textContent = "This phone blocked saving. Free some space and try again.";
     } finally {
       saving = false;
@@ -1905,26 +2065,53 @@
     if (!date) { err.textContent = "Choose a date."; return; }
     if (cents == null) { err.textContent = "Enter an amount more than zero."; document.getElementById("savings-amount").focus(); return; }
     var signed = way.value === "out" ? -cents : cents;
+    var existing = editingEntryId ? findEntry(editingEntryId) : null;
+    if (existing && existing.type !== "savings") existing = null;
     saving = true;
     try {
-      var entry = {
-        id: newId(),
-        type: "savings",
-        date: date,
-        who: who.value,
-        amountCents: signed,
-        note: note,
-        createdAt: new Date().toISOString(),
-        hasPhoto: false,
-        receiptName: "",
-        category: ""
-      };
-      entries.push(entry);
-      saveEntries(entries);
-      syncEntry(entry);
-      location.hash = "#/";
+      if (existing) {
+        var prev = { date: existing.date, who: existing.who, amountCents: existing.amountCents, note: existing.note, synced: existing.synced };
+        existing.date = date;
+        existing.who = who.value;
+        existing.amountCents = signed;
+        existing.note = note;
+        existing.category = "";
+        existing.synced = false;
+        try {
+          saveEntries(entries);
+        } catch (errSave) {
+          existing.date = prev.date;
+          existing.who = prev.who;
+          existing.amountCents = prev.amountCents;
+          existing.note = prev.note;
+          existing.synced = prev.synced;
+          throw errSave;
+        }
+        syncEntry(existing);
+      } else {
+        var entry = {
+          id: newId(),
+          type: "savings",
+          date: date,
+          who: who.value,
+          amountCents: signed,
+          note: note,
+          createdAt: new Date().toISOString(),
+          hasPhoto: false,
+          receiptName: "",
+          category: ""
+        };
+        entries.push(entry);
+        try {
+          saveEntries(entries);
+        } catch (errSave) {
+          entries.pop();
+          throw errSave;
+        }
+        syncEntry(entry);
+      }
+      goHome();
     } catch (e) {
-      entries.pop();
       err.textContent = "This phone blocked saving. Free some space and try again.";
     } finally {
       saving = false;
@@ -1953,10 +2140,12 @@
       if (!clock.ok) { err.textContent = clock.error; return; }
       remindTime = clock.time;
     }
+    var existing = editingEntryId ? findEntry(editingEntryId) : null;
+    if (existing && existing.type !== "spending") existing = null;
     saving = true;
     var btn = document.getElementById("spend-save");
     btn.disabled = true;
-    var id = newId();
+    var id = existing ? existing.id : newId();
     var photo = spendPhoto;
     var ready = Promise.resolve();
     if (photo && photo.jpeg) {
@@ -1970,18 +2159,33 @@
       var done = Promise.resolve();
       if (photo && photo.blob) done = idbPut(id, { blob: photo.blob, name: photo.name });
       return done.then(function () {
-        var entry = {
-          id: id,
-          type: "spending",
-          date: date,
-          category: picked.value,
-          amountCents: cents,
-          note: note,
-          createdAt: new Date().toISOString(),
-          hasPhoto: !!(photo && photo.blob),
-          receiptName: photo && photo.blob ? photo.name : ""
-        };
-        entries.push(entry);
+        var keptName = existing ? (existing.receiptName || "") : "";
+        var keptPhoto = existing ? !!existing.hasPhoto : false;
+        var hasPhoto = photo && photo.blob ? true : keptPhoto;
+        var receiptName = photo && photo.blob ? photo.name : keptName;
+        var entry = existing;
+        if (entry) {
+          entry.date = date;
+          entry.category = picked.value;
+          entry.amountCents = cents;
+          entry.note = note;
+          entry.hasPhoto = hasPhoto;
+          entry.receiptName = receiptName;
+          entry.synced = false;
+        } else {
+          entry = {
+            id: id,
+            type: "spending",
+            date: date,
+            category: picked.value,
+            amountCents: cents,
+            note: note,
+            createdAt: new Date().toISOString(),
+            hasPhoto: hasPhoto,
+            receiptName: receiptName
+          };
+          entries.push(entry);
+        }
         saveEntries(entries);
         rememberSpend(note, picked.value, photo && photo.merchant);
         syncEntry(entry);
@@ -1998,7 +2202,7 @@
         } else {
           pendingHomeNote = "";
         }
-        location.hash = "#/";
+        goHome();
       });
     }).catch(function () {
       err.textContent = "Could not store the photo on this phone. Free some space and try again.";
@@ -2018,7 +2222,9 @@
     var previewUrl = URL.createObjectURL(file);
     var pending = fileToJpegBlob(file);
     spendPhoto = { blob: null, name: name, previewUrl: previewUrl, merchant: "", jpeg: pending, file: file };
-    document.getElementById("photo-preview").src = previewUrl;
+    var previewImg = document.getElementById("photo-preview");
+    previewImg.hidden = false;
+    previewImg.src = previewUrl;
     document.getElementById("photo-filename").textContent = name;
     document.getElementById("photo-preview-wrap").hidden = false;
     readReceipt(file, token);
@@ -2921,7 +3127,7 @@
       }
       syncEntry(entry);
       markHandled(reminder.id, approveTarget.monthKey, "approved");
-      location.hash = "#/";
+      goHome();
     } catch (e) {
       entries.pop();
       err.textContent = "This phone blocked saving. Free some space and try again.";
@@ -3034,7 +3240,7 @@
     document.getElementById("approve-skip").addEventListener("click", function () {
       if (!approveTarget) return;
       skipOccurrence(approveTarget.id, approveTarget.monthKey);
-      location.hash = "#/";
+      goHome();
     });
     document.getElementById("cat-add-form").addEventListener("submit", function (ev) {
       ev.preventDefault();

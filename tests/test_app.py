@@ -39,7 +39,7 @@ def main():
     assert "the sheet stores the receipt file name" in html
     assert "sent when you open the app online again" in html
     assert "this phone remembers which category you used for that store" in html
-    assert "hm-v1.7.4" in (ROOT / "sw.js").read_text()
+    assert "hm-v1.8.0" in (ROOT / "sw.js").read_text()
     assert "Remind me each month" in html
     assert 'id="spend-remind"' in html
     assert "Save reminder" in html
@@ -501,6 +501,140 @@ def main():
         assert kept_spend["note"] == "october mortgage"
         assert kept_spend["synced"] is False
         assert kept_spend["queued"] is False
+
+        page.locator("a.brand").click()
+        page.wait_for_selector("#recent article.entry")
+        grocery = page.locator("#recent article.entry", has_text="Groceries").first
+        grocery.locator("button", has_text="Edit").click()
+        page.wait_for_selector("#view-spend:not([hidden]) #spend-save")
+        assert text(page, "#spend-save") == "Save changes"
+        assert text(page, "#view-spend h2") == "Change spending"
+        assert page.locator("#spend-remind").is_checked() is False
+        assert page.locator("#spend-remind-fields").is_hidden()
+        assert text(page, "#photo-filename") == fname
+        assert page.locator("#cat-chips input[value='Groceries']").is_checked()
+        page.locator("#view-spend a.back").click()
+        page.wait_for_selector("#recent article.entry")
+
+        before_edit = page.evaluate("""() => {
+          const entries = JSON.parse(localStorage.getItem('householdMoney.entries.v1'));
+          const spend = entries.find(e => e.note === 'october mortgage');
+          const reminders = JSON.parse(localStorage.getItem('hm.reminders.v1') || '[]');
+          const rem = reminders.find(r => r.note === 'october mortgage');
+          const income = entries.find(e => e.type === 'income' && e.who === 'Mitch');
+          return {
+            count: entries.length,
+            id: spend.id,
+            cents: spend.amountCents,
+            category: spend.category,
+            date: spend.date,
+            remId: rem && rem.id,
+            remCents: rem && rem.amountCents,
+            remDay: rem && rem.dayOfMonth,
+            remCat: rem && rem.category,
+            incomeId: income && income.id
+          };
+        }""")
+        edit_posts = []
+        page.on("request", lambda req: edit_posts.append(req.url) if "script.google.com" in req.url or "google.com/macros" in req.url else None)
+        page.locator("#recent article.entry", has_text="october mortgage").locator("button", has_text="Edit").click()
+        page.wait_for_selector("#spend-save")
+        assert text(page, "#spend-save") == "Save changes"
+        assert page.locator("#spend-remind").is_checked() is False
+        assert page.locator("#spend-date").input_value() == "2026-10-01"
+        assert page.locator("#cat-chips input[value='Mortgage']").is_checked()
+        assert page.locator("#spend-note").input_value() == "october mortgage"
+        page.locator("#spend-amount").fill("0")
+        page.locator("#spend-save").click()
+        assert text(page, "#spend-error") == "Enter an amount more than zero."
+        unchanged = page.evaluate("""(id) => {
+          const entries = JSON.parse(localStorage.getItem('householdMoney.entries.v1'));
+          const spend = entries.find(e => e.id === id);
+          return { count: entries.length, cents: spend.amountCents, category: spend.category, note: spend.note };
+        }""", before_edit["id"])
+        assert unchanged["count"] == before_edit["count"]
+        assert unchanged["cents"] == 120000
+        assert unchanged["category"] == "Mortgage"
+        assert unchanged["note"] == "october mortgage"
+        page.locator("#spend-amount").fill("44.50")
+        page.locator("#spend-date").fill("2026-10-02")
+        page.locator("#cat-chips label.chip", has_text="Utilities").click()
+        page.locator("#spend-note").fill("edited mortgage")
+        page.locator("#spend-save").click()
+        page.wait_for_function("""() => {
+          const entries = JSON.parse(localStorage.getItem('householdMoney.entries.v1') || '[]');
+          return entries.some(e => e.note === 'edited mortgage' && e.category === 'Utilities');
+        }""")
+        edited = page.evaluate("""(before) => {
+          const entries = JSON.parse(localStorage.getItem('householdMoney.entries.v1'));
+          const hits = entries.filter(e => e.id === before.id);
+          const reminders = JSON.parse(localStorage.getItem('hm.reminders.v1') || '[]');
+          const rem = reminders.find(r => r.id === before.remId);
+          return {
+            count: entries.length,
+            hits: hits.length,
+            entry: hits[0] || null,
+            oldNote: entries.some(e => e.note === 'october mortgage'),
+            rem: rem ? { cents: rem.amountCents, day: rem.dayOfMonth, cat: rem.category, note: rem.note } : null
+          };
+        }""", before_edit)
+        print("EDITED", edited, "EDIT_POSTS", edit_posts)
+        assert edit_posts == []
+        assert edited["count"] == before_edit["count"]
+        assert edited["hits"] == 1
+        assert edited["entry"]["id"] == before_edit["id"]
+        assert edited["entry"]["type"] == "spending"
+        assert edited["entry"]["amountCents"] == 4450
+        assert edited["entry"]["category"] == "Utilities"
+        assert edited["entry"]["date"] == "2026-10-02"
+        assert edited["entry"]["note"] == "edited mortgage"
+        assert edited["entry"]["synced"] is False
+        assert edited["oldNote"] is False
+        assert edited["rem"]["cents"] == before_edit["remCents"]
+        assert edited["rem"]["day"] == before_edit["remDay"]
+        assert edited["rem"]["cat"] == "Mortgage"
+        assert edited["rem"]["note"] == "october mortgage"
+        page.wait_for_function("() => !document.getElementById('view-home').hidden && document.getElementById('recent').innerText.includes('Utilities') && document.getElementById('recent').innerText.includes('edited mortgage')")
+        assert "Utilities" in page.locator("#recent").inner_text()
+
+        page.locator("#recent article.entry", has_text="Mitch income").locator("button", has_text="Edit").click()
+        page.wait_for_selector("#income-save")
+        assert text(page, "#income-save") == "Save changes"
+        assert page.locator("#who-chips input[value='Mitch']").is_checked()
+        page.locator("#who-chips label.chip", has_text="Tonya").click()
+        page.locator("#income-amount").fill("150")
+        page.locator("#income-note").fill("edited paycheck")
+        page.locator("#income-save").click()
+        page.wait_for_function("""(id) => {
+          const entries = JSON.parse(localStorage.getItem('householdMoney.entries.v1'));
+          const hit = entries.find(e => e.id === id);
+          return hit && hit.who === 'Tonya' && hit.amountCents === 15000 && hit.note === 'edited paycheck' && hit.synced === false;
+        }""", arg=before_edit["incomeId"])
+        income_count = page.evaluate("""(id) => JSON.parse(localStorage.getItem('householdMoney.entries.v1')).filter(e => e.id === id).length""", before_edit["incomeId"])
+        assert income_count == 1
+
+        page.locator("#go-savings").click()
+        page.wait_for_selector("#savings-form")
+        page.locator("#savings-who-chips label.chip", has_text="Tonya").click()
+        page.locator("#savings-amount").fill("10")
+        page.locator("#savings-note").fill("edit savings")
+        page.locator("#savings-save").click()
+        page.wait_for_function("""() => JSON.parse(localStorage.getItem('householdMoney.entries.v1')).some(e => e.note === 'edit savings')""")
+        page.locator("#recent article.entry", has_text="edit savings").locator("button", has_text="Edit").click()
+        page.wait_for_selector("#savings-save")
+        assert text(page, "#savings-save") == "Save changes"
+        page.locator("#savings-amount").fill("0")
+        page.locator("#savings-save").click()
+        assert text(page, "#savings-error") == "Enter an amount more than zero."
+        page.locator("#savings-who-chips label.chip", has_text="Mitch").click()
+        page.locator("label.chip", has_text="Take out").click()
+        page.locator("#savings-amount").fill("12")
+        page.locator("#savings-save").click()
+        page.wait_for_function("""() => {
+          const entries = JSON.parse(localStorage.getItem('householdMoney.entries.v1'));
+          const hits = entries.filter(e => e.note === 'edit savings');
+          return hits.length === 1 && hits[0].amountCents === -1200 && hits[0].who === 'Mitch' && hits[0].synced === false;
+        }""")
         browser.close()
     print("PASS")
 
