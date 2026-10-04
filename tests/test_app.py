@@ -38,7 +38,7 @@ def main():
     assert "the sheet stores the receipt file name" in html
     assert "sent when you open the app online again" in html
     assert "this phone remembers which category you used for that store" in html
-    assert "hm-v1.7.0" in (ROOT / "sw.js").read_text()
+    assert "hm-v1.7.1" in (ROOT / "sw.js").read_text()
     assert "Save reminder" in html
     assert "Not this time" in html
     assert "Not saved until you tap Approve" in html

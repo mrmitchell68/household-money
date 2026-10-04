@@ -1444,6 +1444,12 @@
   function postSync(payload) {
     if (!SHEET_SYNC_URL) return Promise.resolve(false);
     if (sheetPullSkipped()) return Promise.resolve(false);
+    // The live script treats an unknown action as a Log row. Hold reminder
+    // posts until a pull includes a reminders array, which means the new script is deployed.
+    if (reminderAction(payload) && !reminderSyncReady) {
+      enqueueSync(payload);
+      return Promise.resolve(false);
+    }
     return fetch(SHEET_SYNC_URL, {
       method: "POST",
       mode: "no-cors",
@@ -1458,6 +1464,11 @@
   }
 
   var syncFlushing = false;
+  var reminderSyncReady = false;
+
+  function reminderAction(payload) {
+    return payload && (payload.action === "saveReminder" || payload.action === "deleteReminder");
+  }
 
   function flushSyncQueue() {
     if (sheetPullSkipped()) return;
@@ -1466,6 +1477,15 @@
     if (!list.length) return;
     syncFlushing = true;
     saveSyncQueue([]);
+    var send = [];
+    var hold = [];
+    list.forEach(function (payload) {
+      if (reminderAction(payload) && !reminderSyncReady) hold.push(payload);
+      else send.push(payload);
+    });
+    if (hold.length) saveSyncQueue(hold.concat(loadSyncQueue()));
+    list = send;
+    if (!list.length) { syncFlushing = false; return; }
     var chain = Promise.resolve();
     list.forEach(function (payload) {
       chain = chain.then(function () {
@@ -1541,7 +1561,11 @@
       if (!payload) return;
       if (Array.isArray(payload.entries)) mergePulledEntries(payload.entries);
       if (Array.isArray(payload.categories)) mergePulledCategories(payload.categories);
-      if (Array.isArray(payload.reminders)) mergePulledReminders(payload.reminders);
+      if (Array.isArray(payload.reminders)) {
+        reminderSyncReady = true;
+        mergePulledReminders(payload.reminders);
+        flushSyncQueue();
+      }
     }
     window[name] = function (payload) { finish(payload); };
     script.onerror = function () { finish(null); };
