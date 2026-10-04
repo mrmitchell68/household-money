@@ -41,12 +41,9 @@ def main():
     tiny_png(PNG)
 
     with sync_playwright() as p:
-        try:
-            browser = p.chromium.launch()
-        except Exception as exc:
-            print("PLAYWRIGHT_BROWSER", exc)
-            browser = p.chromium.launch(channel="chrome")
+        browser = p.chromium.launch(channel="chrome")
         page = browser.new_page(viewport={"width": 412, "height": 915})
+        page.route("**/*script.google.com/**", lambda route: route.abort())
         page.on("pageerror", lambda err: print("PAGEERROR", err))
         page.goto(URL, wait_until="domcontentloaded")
         page.wait_for_function("() => window.HM && document.querySelector('#week-in')")
@@ -188,7 +185,7 @@ def main():
           };
         }""")
         print("LOGIC", logic)
-        assert logic["weekStart"] == "2026-09-27"
+        assert logic["weekStart"] == "2026-09-28"
         assert logic["monthStart"] == "2026-10-01"
         assert logic["week"]["moneyIn"] == 10000
         assert logic["week"]["moneyOut"] == 2500

@@ -255,7 +255,7 @@
     <div id="view-home">
       <section class="panel" aria-labelledby="week-title">
         <h1 id="week-title">This week</h1>
-        <p class="sub" id="week-range">Sunday through today</p>
+        <p class="sub" id="week-range">Monday through today</p>
         <div class="stats">
           <div class="stat"><div class="label">Money in</div><div class="num in" id="week-in">$0.00</div></div>
           <div class="stat"><div class="label">Money out</div><div class="num out" id="week-out">$0.00</div></div>
@@ -473,7 +473,9 @@
   function weekStartYMD(now) {
     var d = now || new Date();
     var local = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    local.setDate(local.getDate() - local.getDay());
+    // Monday through Sunday. getDay() is 0 on Sunday, so Sunday is 6 days after Monday.
+    var sinceMonday = (local.getDay() + 6) % 7;
+    local.setDate(local.getDate() - sinceMonday);
     return todayYMD(local);
   }
 
@@ -1195,7 +1197,7 @@
     setSigned("saved-total", roll.totalSaved);
     setSigned("carried-in", roll.carriedIn);
     setSigned("left-rolls", roll.leftNow);
-    document.getElementById("week-range").textContent = formatEntryDate(weekStart) + " through " + formatEntryDate(today) + " (Sunday through today)";
+    document.getElementById("week-range").textContent = formatEntryDate(weekStart) + " through " + formatEntryDate(today) + " (Monday through today)";
     document.getElementById("month-range").textContent = formatEntryDate(monthStart) + " through " + formatEntryDate(today);
     revokeThumbs();
     var list = document.getElementById("recent");

@@ -1,6 +1,6 @@
 # Household Money
 
-A phone page for Mitch and Tonya. It tracks money in, money out, and what's left this week (Sunday through today) and this month. Receipt photos stay on the phone. There is no app store and no account.
+A phone page for Mitch and Tonya. It tracks money in, money out, and what's left this week (Monday through today) and this month. Receipt photos stay on the phone. There is no app store and no account.
 
 Entries live on the phone that saved them. The [shared Google Sheet](https://docs.google.com/spreadsheets/d/15Yk4zozMPdaJEURppm4JmCXb--HyCgOPW8-31RTd_8g/edit) is a separate log. This app does not write to that sheet.
 
