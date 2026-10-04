@@ -1,8 +1,8 @@
 /* Household Money service worker.
-   cache-bust: hm-v1.4.0
+   cache-bust: hm-v1.5.0
    A service worker cannot network-first its own script. Bump VERSION to refresh the shell.
    The page posts "skipWaiting" so an update takes control. This file is not put in the cache. */
-const VERSION = "hm-v1.4.0";
+const VERSION = "hm-v1.5.0";
 const SHELL_CACHE = VERSION + "-shell";
 const SHELL = [
   "./",

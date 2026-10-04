@@ -30,7 +30,7 @@ def main():
     html = (ROOT / "index.html").read_text()
     for cat in CATS:
         assert cat in html, cat
-    for label in ("Add income", "Add spending", "Shared Google Sheet", "Save photo", "eBay, Amazon, Facebook Marketplace, Walmart, and other online buys."):
+    for label in ("Add income", "Add spending", "Add savings", "Put aside", "Take out", "Saved this month", "Total saved", "Carried in from last month", "Left (rolls to next month)", "Shared Google Sheet", "Save photo", "eBay, Amazon, Facebook Marketplace, Walmart, and other online buys."):
         assert label in html, label
     assert "does not write to Google Sheets" not in html
     assert "Income, spending, and categories saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet." in html
@@ -55,7 +55,7 @@ def main():
         assert empty == {k: "$0.00" for k in empty}
 
         page.locator("#go-income").click()
-        page.locator("label.chip", has_text="Mitch").click()
+        page.locator("#who-chips label.chip", has_text="Mitch").click()
         page.locator("#income-amount").fill("100")
         page.locator("#income-save").click()
         page.wait_for_function("() => location.hash === '#/' && document.querySelector('#week-in').textContent === '$100.00'")
@@ -79,6 +79,12 @@ def main():
         assert totals["month-in"] == "$100.00"
         assert totals["month-out"] == "$25.00"
         assert totals["month-left"] == "$75.00"
+        roll_ui = {k: text(page, "#" + k) for k in ("saved-month", "saved-total", "carried-in", "left-rolls")}
+        print("ROLL_UI", roll_ui)
+        assert roll_ui["saved-month"] == "$0.00"
+        assert roll_ui["saved-total"] == "$0.00"
+        assert roll_ui["carried-in"] == "$0.00"
+        assert roll_ui["left-rolls"] == "$75.00"
         assert "Mitch income" in page.locator("#recent").inner_text()
         assert "Groceries" in page.locator("#recent").inner_text()
         assert fname in page.locator("#recent").inner_text()
@@ -229,6 +235,41 @@ def main():
         assert "Pets" not in cats["b"]["toAdd"]
         assert cats["c"]["local"] == ["Tithes"]
         assert "Pets" in cats["c"]["toDeleteRetry"]
+
+        roll = page.evaluate("""() => {
+          const rows = [
+            {type:'income', date:'2026-09-15', amountCents:10000},
+            {type:'spending', date:'2026-09-20', amountCents:4000},
+            {type:'savings', date:'2026-09-21', amountCents:1000},
+            {type:'savings', date:'2026-08-01', amountCents:2000},
+            {type:'income', date:'2026-10-01', amountCents:5000},
+            {type:'spending', date:'2026-10-02', amountCents:2000},
+            {type:'savings', date:'2026-10-03', amountCents:1500},
+            {type:'savings', date:'2026-10-03', amountCents:-500},
+            {type:'spending', date:'2026-10-03', amountCents:100, category:'Groceries'}
+          ];
+          const roll = HM.savingsAndLeftover(rows, '2026-10-01', '2026-10-03');
+          const month = HM.summarize(rows, '2026-10-01', '2026-10-03');
+          const neg = HM.savingsAndLeftover([
+            {type:'spending', date:'2026-09-02', amountCents:5000},
+            {type:'income', date:'2026-10-02', amountCents:1000},
+            {type:'savings', date:'2026-10-02', amountCents:-200}
+          ], '2026-10-01', '2026-10-03');
+          return { roll: roll, monthOut: month.moneyOut, monthLeft: month.left, neg: neg };
+        }""")
+        print("ROLL", roll)
+        assert roll["roll"]["savedThisMonth"] == 1000
+        assert roll["roll"]["totalSaved"] == 4000
+        assert roll["roll"]["carriedIn"] == 3000
+        assert roll["roll"]["monthLeftover"] == 1900
+        assert roll["roll"]["leftNow"] == 4900
+        assert roll["monthOut"] == 2100
+        assert roll["monthLeft"] == 2900
+        assert roll["neg"]["carriedIn"] == -5000
+        assert roll["neg"]["savedThisMonth"] == -200
+        assert roll["neg"]["monthLeftover"] == 1200
+        assert roll["neg"]["leftNow"] == -3800
+        assert roll["neg"]["totalSaved"] == -200
         browser.close()
     print("PASS")
 

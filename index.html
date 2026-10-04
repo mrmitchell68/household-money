@@ -64,6 +64,7 @@
       margin-bottom: 12px;
     }
     .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .stats.quad { grid-template-columns: 1fr 1fr; }
     .stat { text-align: center; }
     .stat .label { color: var(--muted); font-size: 0.85rem; font-weight: 650; }
     .num { font-size: 1.15rem; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 4px; }
@@ -271,6 +272,17 @@
         </div>
       </section>
       <p class="sub">Left is money in minus money out. Saved on this phone.</p>
+      <section class="panel" aria-labelledby="savings-title">
+        <h2 id="savings-title">Savings</h2>
+        <p class="sub">Money set aside is not spending. What is left rolls to next month, even if it is negative.</p>
+        <div class="stats quad">
+          <div class="stat"><div class="label">Saved this month</div><div class="num" id="saved-month">$0.00</div></div>
+          <div class="stat"><div class="label">Total saved</div><div class="num" id="saved-total">$0.00</div></div>
+          <div class="stat"><div class="label">Carried in from last month</div><div class="num" id="carried-in">$0.00</div></div>
+          <div class="stat"><div class="label">Left (rolls to next month)</div><div class="num" id="left-rolls">$0.00</div></div>
+        </div>
+        <button class="btn btn-primary btn-block" id="go-savings" type="button">Add savings</button>
+      </section>
       <h2>Recent</h2>
       <div id="recent" aria-live="polite"></div>
       <div class="dock" id="dock">
@@ -338,6 +350,36 @@
       </form>
     </div>
 
+    <div id="view-savings" hidden>
+      <a class="back" href="#/">Back</a>
+      <h2>Add savings</h2>
+      <form id="savings-form" autocomplete="off">
+        <label class="field" for="savings-date">Date</label>
+        <input id="savings-date" name="date" type="date" required>
+        <fieldset>
+          <legend>Who</legend>
+          <div class="chips" id="savings-who-chips">
+            <label class="chip"><input type="radio" name="savings-who" value="Mitch"> Mitch</label>
+            <label class="chip"><input type="radio" name="savings-who" value="Tonya"> Tonya</label>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Which way</legend>
+          <div class="chips">
+            <label class="chip"><input type="radio" name="savings-way" value="aside" checked> Put aside</label>
+            <label class="chip"><input type="radio" name="savings-way" value="out"> Take out</label>
+          </div>
+        </fieldset>
+        <label class="field" for="savings-amount">Amount</label>
+        <input id="savings-amount" name="amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" aria-required="true">
+        <label class="field" for="savings-note">Note <span class="note">(optional)</span></label>
+        <input id="savings-note" name="note" type="text" maxlength="200" placeholder="Emergency fund, took some back…">
+        <p class="hint">Put aside stores the amount as savings. Take out puts that money back in the household pot. This is not spending.</p>
+        <p class="error" id="savings-error" role="alert"></p>
+        <button class="btn btn-primary btn-block" id="savings-save" type="submit">Save</button>
+      </form>
+    </div>
+
     <div id="view-categories" hidden>
       <a class="back" href="#/">Back</a>
       <h2>Categories</h2>
@@ -375,6 +417,7 @@
       <h3>Backup</h3>
       <p>Income, spending, and categories saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet. When the phone is online, new income and spending are also added to the shared Google Sheet, under the category you picked. Photos stay on the phone that took them. The other phone sees the receipt file name only, and the sheet stores the receipt file name. If the phone is offline, the entry is saved here and sent when you open the app online again. Export a backup if you want a file of what is saved here. Import merges by entry id and does not duplicate entries already on this phone.</p>
       <p>A receipt photo can fill in the amount and store, and this phone remembers which category you used for that store.</p>
+      <p>Savings you put aside or take out is saved the same way and is not counted as spending. What is left after income, spending, and savings carries to the next month, even if it is negative.</p>
       <button class="btn btn-primary btn-block" id="export-backup" type="button">Export backup</button>
       <label class="btn btn-block" for="import-file" style="display:flex;align-items:center;justify-content:center;margin-top:8px;">Import backup</label>
       <input class="file-input" id="import-file" type="file" accept="application/json,.json" aria-label="Import backup file">
@@ -470,6 +513,42 @@
       else if (e.type === "spending") moneyOut += cents;
     });
     return { moneyIn: moneyIn, moneyOut: moneyOut, left: moneyIn - moneyOut };
+  }
+
+  function savingsAndLeftover(list, monthStart, today) {
+    var savedThisMonth = 0;
+    var totalSaved = 0;
+    var priorIn = 0;
+    var priorOut = 0;
+    var priorSaved = 0;
+    var monthIn = 0;
+    var monthOut = 0;
+    (list || []).forEach(function (e) {
+      if (!e || typeof e.date !== "string") return;
+      var cents = Math.round(Number(e.amountCents) || 0);
+      var before = e.date < monthStart;
+      var inMonth = e.date >= monthStart && e.date <= today;
+      if (e.type === "savings") {
+        totalSaved += cents;
+        if (inMonth) savedThisMonth += cents;
+        if (before) priorSaved += cents;
+      } else if (e.type === "income") {
+        if (before) priorIn += cents;
+        if (inMonth) monthIn += cents;
+      } else if (e.type === "spending") {
+        if (before) priorOut += cents;
+        if (inMonth) monthOut += cents;
+      }
+    });
+    var carried = priorIn - priorOut - priorSaved;
+    var monthLeftover = monthIn - monthOut - savedThisMonth;
+    return {
+      savedThisMonth: savedThisMonth,
+      totalSaved: totalSaved,
+      carriedIn: carried,
+      monthLeftover: monthLeftover,
+      leftNow: carried + monthLeftover
+    };
   }
 
   function newId() {
@@ -1093,6 +1172,12 @@
     left.classList.toggle("neg", sum.left < 0);
   }
 
+  function setSigned(id, cents) {
+    var node = document.getElementById(id);
+    node.textContent = formatUSD(cents);
+    node.classList.toggle("neg", cents < 0);
+  }
+
   function revokeThumbs() {
     thumbUrls.forEach(function (u) { URL.revokeObjectURL(u); });
     thumbUrls = [];
@@ -1105,6 +1190,11 @@
     var monthStart = monthStartYMD(now);
     setMoney("week", summarize(entries, weekStart, today));
     setMoney("month", summarize(entries, monthStart, today));
+    var roll = savingsAndLeftover(entries, monthStart, today);
+    setSigned("saved-month", roll.savedThisMonth);
+    setSigned("saved-total", roll.totalSaved);
+    setSigned("carried-in", roll.carriedIn);
+    setSigned("left-rolls", roll.leftNow);
     document.getElementById("week-range").textContent = formatEntryDate(weekStart) + " through " + formatEntryDate(today) + " (Sunday through today)";
     document.getElementById("month-range").textContent = formatEntryDate(monthStart) + " through " + formatEntryDate(today);
     revokeThumbs();
@@ -1124,7 +1214,7 @@
   function entryRow(e) {
     var row = el("article", "entry");
     row.dataset.id = e.id;
-    var title = e.type === "income" ? (e.who + " income") : (e.category || "Spending");
+    var title = e.type === "income" ? (e.who + " income") : (e.type === "savings" ? ((e.who || "Savings") + " savings") : (e.category || "Spending"));
     if (e.hasPhoto) {
       var thumb = el("button", "thumb");
       thumb.type = "button";
@@ -1145,8 +1235,16 @@
     del.addEventListener("click", function () { deleteEntry(e.id); });
     main.appendChild(del);
     row.appendChild(main);
-    var amt = el("div", "entry-amt " + (e.type === "spending" ? "out" : "in"));
-    amt.textContent = e.type === "spending" ? formatUSD(-e.amountCents) : formatUSD(e.amountCents);
+    var amtClass = "in";
+    var amtCents = e.amountCents;
+    if (e.type === "spending") {
+      amtClass = "out";
+      amtCents = -e.amountCents;
+    } else if (e.type === "savings" && e.amountCents < 0) {
+      amtClass = "out";
+    }
+    var amt = el("div", "entry-amt " + amtClass);
+    amt.textContent = formatUSD(amtCents);
     row.appendChild(amt);
     return row;
   }
@@ -1230,13 +1328,14 @@
 
   function entrySyncPayload(entry) {
     var income = entry.type === "income";
+    var savings = entry.type === "savings";
     return {
       token: SHEET_SYNC_TOKEN,
       id: entry.id,
       date: entry.date,
-      kind: income ? "Income" : "Spending",
-      who: income ? (entry.who || "") : "",
-      category: income ? "" : (entry.category || ""),
+      kind: savings ? "Savings" : (income ? "Income" : "Spending"),
+      who: (income || savings) ? (entry.who || "") : "",
+      category: (income || savings) ? "" : (entry.category || ""),
       amount: dollarsFromCents(entry.amountCents),
       note: entry.note || "",
       receipt: entry.receiptName || ""
@@ -1361,10 +1460,12 @@
       var id = String(raw.id);
       remoteIds[id] = true;
       if (byId[id]) return;
-      var type = raw.type === "income" || raw.type === "spending" ? raw.type : "";
+      var type = raw.type === "income" || raw.type === "spending" || raw.type === "savings" ? raw.type : "";
       var date = String(raw.date || "");
       var cents = Math.round(Number(raw.amountCents) || 0);
-      if (!type || !/^\d{4}-\d{2}-\d{2}$/.test(date) || cents <= 0) return;
+      if (!type || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+      if (type === "savings") { if (!cents) return; }
+      else if (cents <= 0) return;
       var entry = {
         id: id,
         type: type,
@@ -1376,9 +1477,10 @@
         receiptName: String(raw.receiptName || "").slice(0, 120),
         synced: true
       };
-      if (type === "income") {
+      if (type === "income" || type === "savings") {
         if (raw.who !== "Mitch" && raw.who !== "Tonya") return;
         entry.who = raw.who;
+        if (type === "savings") entry.category = "";
       } else {
         var cat = cleanCategoryName(raw.category).slice(0, 40);
         entry.category = cat;
@@ -1467,7 +1569,7 @@
     var e = null;
     entries.forEach(function (item) { if (item.id === id) e = item; });
     if (!e) return;
-    var title = e.type === "income" ? (e.who + " income") : (e.category || "spending");
+    var title = e.type === "income" ? (e.who + " income") : (e.type === "savings" ? ((e.who || "Savings") + " savings") : (e.category || "spending"));
     if (!confirm("Delete " + title + " (" + formatUSD(e.amountCents) + ")? This cannot be undone.")) return;
     entries = entries.filter(function (item) { return item.id !== id; });
     saveEntries(entries);
@@ -1493,6 +1595,14 @@
     document.getElementById("income-error").textContent = "";
   }
 
+  function openSavings() {
+    document.getElementById("savings-form").reset();
+    document.getElementById("savings-date").value = todayYMD();
+    document.getElementById("savings-error").textContent = "";
+    var aside = document.querySelector('input[name="savings-way"][value="aside"]');
+    if (aside) aside.checked = true;
+  }
+
   function openSpend() {
     clearSpendPhoto();
     document.getElementById("spend-form").reset();
@@ -1504,13 +1614,14 @@
   }
 
   function showView(name, focusHeading) {
-    ["home", "income", "spend", "categories", "settings"].forEach(function (view) {
+    ["home", "income", "spend", "savings", "categories", "settings"].forEach(function (view) {
       document.getElementById("view-" + view).hidden = view !== name;
     });
     document.body.classList.toggle("with-dock", name === "home");
     if (name === "home") renderHome();
     if (name === "income") openIncome();
     if (name === "spend") openSpend();
+    if (name === "savings") openSavings();
     if (name === "categories") renderCategories();
     if (focusHeading) {
       var head = document.querySelector("#view-" + name + " h1, #view-" + name + " h2");
@@ -1526,6 +1637,7 @@
     var name = "home";
     if (h.indexOf("#/income") === 0) name = "income";
     else if (h.indexOf("#/spend") === 0) name = "spend";
+    else if (h.indexOf("#/savings") === 0) name = "savings";
     else if (h.indexOf("#/categories") === 0) name = "categories";
     else if (h.indexOf("#/settings") === 0) name = "settings";
     showView(name, focusHeading);
@@ -1555,6 +1667,47 @@
         createdAt: new Date().toISOString(),
         hasPhoto: false,
         receiptName: ""
+      };
+      entries.push(entry);
+      saveEntries(entries);
+      syncEntry(entry);
+      location.hash = "#/";
+    } catch (e) {
+      entries.pop();
+      err.textContent = "This phone blocked saving. Free some space and try again.";
+    } finally {
+      saving = false;
+    }
+  }
+
+  function onSavingsSubmit(ev) {
+    ev.preventDefault();
+    if (saving) return;
+    var err = document.getElementById("savings-error");
+    err.textContent = "";
+    var who = document.querySelector('#savings-who-chips input[name="savings-who"]:checked');
+    var way = document.querySelector('input[name="savings-way"]:checked');
+    var date = document.getElementById("savings-date").value;
+    var cents = parseCents(document.getElementById("savings-amount").value);
+    var note = document.getElementById("savings-note").value.trim().slice(0, 200);
+    if (!who) { err.textContent = "Choose Mitch or Tonya."; return; }
+    if (!way) { err.textContent = "Choose put aside or take out."; return; }
+    if (!date) { err.textContent = "Choose a date."; return; }
+    if (cents == null) { err.textContent = "Enter an amount more than zero."; document.getElementById("savings-amount").focus(); return; }
+    var signed = way.value === "out" ? -cents : cents;
+    saving = true;
+    try {
+      var entry = {
+        id: newId(),
+        type: "savings",
+        date: date,
+        who: who.value,
+        amountCents: signed,
+        note: note,
+        createdAt: new Date().toISOString(),
+        hasPhoto: false,
+        receiptName: "",
+        category: ""
       };
       entries.push(entry);
       saveEntries(entries);
@@ -1700,10 +1853,12 @@
   }
 
   function sanitizeEntry(raw) {
-    if (!raw || (raw.type !== "income" && raw.type !== "spending")) return null;
+    if (!raw || (raw.type !== "income" && raw.type !== "spending" && raw.type !== "savings")) return null;
     if (typeof raw.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date)) return null;
     var amountCents = Number(raw.amountCents);
-    if (!isFinite(amountCents) || amountCents <= 0) return null;
+    if (!isFinite(amountCents)) return null;
+    if (raw.type === "savings") { if (amountCents === 0) return null; }
+    else if (amountCents <= 0) return null;
     var entry = {
       id: String(raw.id),
       type: raw.type,
@@ -1714,9 +1869,10 @@
       hasPhoto: !!raw.hasPhoto,
       receiptName: String(raw.receiptName || "").slice(0, 120)
     };
-    if (raw.type === "income") {
+    if (raw.type === "income" || raw.type === "savings") {
       if (raw.who !== "Mitch" && raw.who !== "Tonya") return null;
       entry.who = raw.who;
+      if (raw.type === "savings") entry.category = "";
     } else {
       entry.category = String(raw.category || "Uncategorized").slice(0, 40);
     }
@@ -1852,8 +2008,10 @@
   function bind() {
     document.getElementById("go-income").addEventListener("click", function () { location.hash = "#/income"; });
     document.getElementById("go-spend").addEventListener("click", function () { location.hash = "#/spend"; });
+    document.getElementById("go-savings").addEventListener("click", function () { location.hash = "#/savings"; });
     document.getElementById("income-form").addEventListener("submit", onIncomeSubmit);
     document.getElementById("spend-form").addEventListener("submit", onSpendSubmit);
+    document.getElementById("savings-form").addEventListener("submit", onSavingsSubmit);
     document.getElementById("spend-camera").addEventListener("change", function (ev) {
       var file = ev.target.files && ev.target.files[0];
       onPhotoChosen(file);
@@ -1917,7 +2075,8 @@
     DEFAULT_CATEGORIES: DEFAULT_CATEGORIES,
     guessCategory: guessCategory,
     extractAmount: extractAmount,
-    mergeCategoryLists: mergeCategoryLists
+    mergeCategoryLists: mergeCategoryLists,
+    savingsAndLeftover: savingsAndLeftover
   };
 })();
   </script>
