@@ -254,14 +254,16 @@
     #photo-full { width: 100%; height: auto; max-height: 65vh; object-fit: contain; border-radius: 12px; background: #111; }
     #photo-dialog .btn { width: 100%; margin-top: 8px; }
     .sheet-link { font-weight: 800; font-size: 1.05rem; }
-    input[type="time"] {
-      width: 100%;
-      min-height: 52px;
-      border-radius: 12px;
-      border: 2px solid var(--line);
-      padding: 8px 12px;
-      background: #fff;
-      font-size: 16px;
+    .clock-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .clock-row .field { margin-top: 0; }
+    .clock-row input[type="number"]::-webkit-inner-spin-button,
+    .clock-row input[type="number"]::-webkit-outer-spin-button {
+      appearance: auto;
+      opacity: 1;
     }
     .due-card {
       background: #fff8e6;
@@ -372,8 +374,23 @@
             <label class="field" for="spend-days-custom">Custom days before</label>
             <input id="spend-days-custom" type="number" inputmode="numeric" min="0" max="60" step="1" placeholder="Or type a number, including 0">
           </fieldset>
-          <label class="field" for="spend-remind-time">Time of day</label>
-          <input id="spend-remind-time" type="time" value="09:00">
+          <fieldset>
+            <legend>Reminder time</legend>
+            <div class="clock-row">
+              <div>
+                <label class="field" for="spend-remind-hour">Hour</label>
+                <input id="spend-remind-hour" type="number" inputmode="numeric" min="1" max="12" step="1" value="9" placeholder="9">
+              </div>
+              <div>
+                <label class="field" for="spend-remind-minute">Minute</label>
+                <input id="spend-remind-minute" type="number" inputmode="numeric" min="0" max="59" step="1" value="00" placeholder="00">
+              </div>
+            </div>
+            <div class="chips" id="spend-remind-ampm">
+              <label class="chip"><input type="radio" name="spend-remind-ampm" value="AM" checked> AM</label>
+              <label class="chip"><input type="radio" name="spend-remind-ampm" value="PM"> PM</label>
+            </div>
+          </fieldset>
         </div>
         <fieldset>
           <legend>Category</legend>
@@ -483,8 +500,23 @@
           <label class="field" for="reminder-days-custom">Custom days before</label>
           <input id="reminder-days-custom" type="number" inputmode="numeric" min="0" max="60" step="1" placeholder="Or type a number, including 0">
         </fieldset>
-        <label class="field" for="reminder-time">Time of day</label>
-        <input id="reminder-time" name="time" type="time" value="09:00">
+        <fieldset>
+          <legend>Reminder time</legend>
+          <div class="clock-row">
+            <div>
+              <label class="field" for="reminder-hour">Hour</label>
+              <input id="reminder-hour" type="number" inputmode="numeric" min="1" max="12" step="1" value="9" placeholder="9">
+            </div>
+            <div>
+              <label class="field" for="reminder-minute">Minute</label>
+              <input id="reminder-minute" type="number" inputmode="numeric" min="0" max="59" step="1" value="00" placeholder="00">
+            </div>
+          </div>
+          <div class="chips" id="reminder-ampm">
+            <label class="chip"><input type="radio" name="reminder-ampm" value="AM" checked> AM</label>
+            <label class="chip"><input type="radio" name="reminder-ampm" value="PM"> PM</label>
+          </div>
+        </fieldset>
         <fieldset>
           <legend>Who <span class="note">(optional)</span></legend>
           <div class="chips" id="reminder-who-chips">
@@ -1917,9 +1949,9 @@
     if (remindOn) {
       remindDays = readDaysBefore("spend-days-custom", '#spend-reminder-days input[name="spend-days-before"]:checked');
       if (!remindDays.ok) { err.textContent = remindDays.error; return; }
-      var timeRaw = document.getElementById("spend-remind-time").value.trim();
-      remindTime = timeRaw ? normalizeTime(timeRaw) : "09:00";
-      if (!remindTime) { err.textContent = "Choose a time of day."; return; }
+      var clock = readClock("spend-remind");
+      if (!clock.ok) { err.textContent = clock.error; return; }
+      remindTime = clock.time;
     }
     saving = true;
     var btn = document.getElementById("spend-save");
@@ -2220,6 +2252,46 @@
     var m = Number(match[2]);
     if (h > 23 || m > 59) return "";
     return pad(h) + ":" + pad(m);
+  }
+
+  function setClock(prefix, hhmm) {
+    var time = normalizeTime(hhmm) || "09:00";
+    var parts = time.split(":");
+    var h = Number(parts[0]);
+    var minute = Number(parts[1]);
+    var ampm = h >= 12 ? "PM" : "AM";
+    var hour = h % 12;
+    if (hour === 0) hour = 12;
+    var hourEl = document.getElementById(prefix + "-hour");
+    var minuteEl = document.getElementById(prefix + "-minute");
+    if (hourEl) hourEl.value = String(hour);
+    if (minuteEl) minuteEl.value = pad(minute);
+    var radio = document.querySelector('input[name="' + prefix + '-ampm"][value="' + ampm + '"]');
+    if (radio) radio.checked = true;
+  }
+
+  function readClock(prefix) {
+    var hourEl = document.getElementById(prefix + "-hour");
+    var minuteEl = document.getElementById(prefix + "-minute");
+    var hourRaw = hourEl ? hourEl.value.trim() : "";
+    var minuteRaw = minuteEl ? minuteEl.value.trim() : "";
+    var hour = 9;
+    var minute = 0;
+    if (hourRaw !== "") {
+      if (!/^\d+$/.test(hourRaw)) return { ok: false, error: "Hour has to be from 1 to 12." };
+      hour = Number(hourRaw);
+      if (hour < 1 || hour > 12) return { ok: false, error: "Hour has to be from 1 to 12." };
+    }
+    if (minuteRaw !== "") {
+      if (!/^\d+$/.test(minuteRaw)) return { ok: false, error: "Minute has to be from 0 to 59." };
+      minute = Number(minuteRaw);
+      if (minute > 59) return { ok: false, error: "Minute has to be from 0 to 59." };
+    }
+    var ampmEl = document.querySelector('input[name="' + prefix + '-ampm"]:checked');
+    var pm = !!(ampmEl && ampmEl.value === "PM");
+    var h24 = hour % 12;
+    if (pm) h24 += 12;
+    return { ok: true, time: pad(h24) + ":" + pad(minute) };
   }
 
   function ordinalDay(n) {
@@ -2548,7 +2620,7 @@
     var form = document.getElementById("reminder-form");
     form.reset();
     document.getElementById("reminder-id").value = "";
-    document.getElementById("reminder-time").value = "09:00";
+    setClock("reminder", "09:00");
     document.getElementById("reminder-error").textContent = "";
     var status = document.getElementById("reminder-status");
     if (status) status.textContent = "";
@@ -2571,7 +2643,7 @@
     }
     document.getElementById("reminder-amount").value = centsToInput(r.amountCents);
     document.getElementById("reminder-day").value = String(r.dayOfMonth);
-    document.getElementById("reminder-time").value = r.time;
+    setClock("reminder", r.time);
     document.getElementById("reminder-note").value = r.note || "";
     var chip = document.querySelector('#reminder-days input[value="' + r.daysBefore + '"]');
     if (chip) chip.checked = true;
@@ -2676,9 +2748,9 @@
     if (day < 1 || day > 31) { err.textContent = "Day of the month has to be from 1 to 31."; return; }
     var days = chosenDaysBefore();
     if (!days.ok) { err.textContent = days.error; return; }
-    var timeRaw = document.getElementById("reminder-time").value.trim();
-    var time = timeRaw ? normalizeTime(timeRaw) : "09:00";
-    if (!time) { err.textContent = "Choose a time of day."; return; }
+    var clock = readClock("reminder");
+    if (!clock.ok) { err.textContent = clock.error; return; }
+    var time = clock.time;
     var whoEl = document.querySelector('#reminder-who-chips input[name="reminder-who"]:checked');
     var who = whoEl ? whoEl.value : "";
     var note = document.getElementById("reminder-note").value.trim().slice(0, 200);

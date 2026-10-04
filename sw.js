@@ -1,11 +1,11 @@
 /* Household Money service worker.
-   cache-bust: hm-v1.7.3
+   cache-bust: hm-v1.7.4
    A service worker cannot network-first its own script. Bump VERSION to refresh the shell.
    The page posts "skipWaiting" so an update takes control. This file is not put in the cache.
    Bill reminders are checked while the page is open (on load and on a timer). There is no
    push subscription. If the phone has the app fully closed, this worker does not wake up
    to notify. notificationclick only runs after a notification was already shown. */
-const VERSION = "hm-v1.7.3";
+const VERSION = "hm-v1.7.4";
 const SHELL_CACHE = VERSION + "-shell";
 const SHELL = [
   "./",

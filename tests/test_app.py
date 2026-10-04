@@ -39,16 +39,20 @@ def main():
     assert "the sheet stores the receipt file name" in html
     assert "sent when you open the app online again" in html
     assert "this phone remembers which category you used for that store" in html
-    assert "hm-v1.7.3" in (ROOT / "sw.js").read_text()
+    assert "hm-v1.7.4" in (ROOT / "sw.js").read_text()
     assert "Remind me each month" in html
     assert 'id="spend-remind"' in html
     assert "Save reminder" in html
     assert 'id="reminder-status"' in html
     assert "Day of the month has to be from 1 to 31." in html
     day_input = re.search(r'<input id="reminder-day"[^>]*>', html).group(0)
-    time_input = re.search(r'<input id="reminder-time"[^>]*>', html).group(0)
     assert "required" not in day_input
-    assert "required" not in time_input
+    assert 'type="time"' not in html
+    assert 'id="reminder-hour"' in html
+    assert 'id="reminder-minute"' in html
+    assert 'id="spend-remind-hour"' in html
+    assert 'id="spend-remind-minute"' in html
+    assert "Reminder time" in html
     assert "Not this time" in html
     assert "Not saved until you tap Approve" in html
     tiny_png(PNG)
@@ -319,15 +323,24 @@ def main():
         day = page.evaluate("() => String(new Date().getDate())")
         page.locator("#reminder-day").fill(day)
         page.locator("#reminder-days label.chip", has_text="7 days").click()
-        page.locator("#reminder-time").fill("00:00")
+        page.locator("#reminder-hour").fill("6")
+        page.locator("#reminder-minute").fill("30")
+        page.locator("#reminder-ampm label.chip", has_text="PM").click()
         page.locator("#reminder-note").fill("bill reminder test")
         page.locator("#reminder-save").click()
         page.wait_for_function("() => document.querySelector('#reminder-list').innerText.includes('Mortgage')")
         assert text(page, "#reminder-status") == "Saved."
+        assert "18:30" in page.locator("#reminder-list").inner_text()
+        page.locator('[aria-label="Edit reminder Mortgage"]').click()
+        assert page.locator("#reminder-hour").input_value() == "6"
+        assert page.locator("#reminder-minute").input_value() == "30"
+        assert page.locator('#reminder-ampm input[value="PM"]').is_checked()
+        page.locator("#reminder-form-title").evaluate("el => el.blur()")
         kept = page.evaluate("""() => {
           const before = JSON.parse(localStorage.getItem('hm.reminders.v1'));
           const saved = before.find(r => r.category === 'Mortgage' && r.note === 'bill reminder test');
           if (!saved || saved.synced) return { ok: false, reason: 'not saved unsynced' };
+          if (saved.time !== '18:30') return { ok: false, reason: 'time ' + saved.time };
           HM.mergePulledReminders([]);
           const afterEmpty = JSON.parse(localStorage.getItem('hm.reminders.v1'));
           const still = afterEmpty.find(r => r.id === saved.id);
@@ -406,7 +419,9 @@ def main():
         page.locator("#rem-cat-chips label.chip", has_text="Car Payment").click()
         page.locator("#reminder-amount").fill("40")
         page.locator("#reminder-day").fill(day)
-        page.locator("#reminder-time").fill("00:00")
+        page.locator("#reminder-hour").fill("9")
+        page.locator("#reminder-minute").fill("0")
+        page.locator("#reminder-ampm label.chip", has_text="AM").click()
         page.locator("#reminder-note").fill("skip me")
         page.locator("#reminder-save").click()
         page.wait_for_function("() => document.querySelector('#reminder-list').innerText.includes('Car Payment')")
@@ -441,7 +456,8 @@ def main():
         page.locator("#spend-remind").check()
         page.wait_for_selector("#spend-remind-fields:not([hidden])")
         assert page.locator('#spend-reminder-days input[value="7"]').is_checked()
-        page.locator("#spend-remind-time").fill("")
+        page.locator("#spend-remind-hour").fill("")
+        page.locator("#spend-remind-minute").fill("")
         page.locator("#spend-save").click()
         page.wait_for_function("() => location.hash === '#/' && document.querySelector('#home-status').textContent.includes('Monthly reminder saved.')")
         kept_spend = page.evaluate("""() => {
