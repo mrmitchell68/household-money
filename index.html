@@ -206,7 +206,7 @@
     }
     .entry-main { flex: 1; min-width: 0; }
     .entry-title { font-weight: 800; }
-    .entry-meta, .receipt-name { color: var(--muted); font-size: 0.92rem; margin-top: 2px; word-break: break-word; }
+    .entry-meta, .receipt-name, .receipt-copy { color: var(--muted); font-size: 0.92rem; margin-top: 2px; word-break: break-word; }
     .entry-amt { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .entry-amt.out { color: var(--out); }
     .entry-amt.in { color: var(--green); }
@@ -411,6 +411,7 @@
           <label class="btn" for="spend-camera">Take photo</label>
           <label class="btn" for="spend-gallery">Choose photo</label>
         </div>
+        <p class="hint">Choose photo can be a picture or a scan you already saved with your phone's scanner. This page does not open the scanner itself.</p>
         <input class="file-input" id="spend-camera" type="file" accept="image/*" capture="environment" aria-label="Take a photo of the receipt">
         <input class="file-input" id="spend-gallery" type="file" accept="image/*" aria-label="Choose a receipt photo from this phone">
         <div class="preview" id="photo-preview-wrap" hidden>
@@ -570,7 +571,7 @@
         <li>Tap <strong>Add</strong>. The icon is named Money.</li>
       </ol>
       <h3>Backup</h3>
-      <p>Income, spending, and categories saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet. When the phone is online, new income and spending are also added to the shared Google Sheet, under the category you picked. Photos stay on the phone that took them. The other phone sees the receipt file name only, and the sheet stores the receipt file name. If the phone is offline, the entry is saved here and sent when you open the app online again. Export a backup if you want a file of what is saved here. Import merges by entry id and does not duplicate entries already on this phone.</p>
+      <p>Income, spending, and categories saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet. When the phone is online, new income and spending are also added to the shared Google Sheet, under the category you picked. Photos stay on the phone that took them. When you save a spending entry that has a photo, a copy is also sent to the Receipts folder in Google Drive. The other phone sees the receipt file name only, and the sheet stores the receipt file name, not the photo. If the phone is offline, the entry is saved here and sent when you open the app online again. Export a backup if you want a file of what is saved here. Import merges by entry id and does not duplicate entries already on this phone.</p>
       <p>A receipt photo can fill in the amount and store, and this phone remembers which category you used for that store.</p>
       <p>Savings you put aside or take out is saved the same way and is not counted as spending. What is left after income, spending, and savings carries to the next month, even if it is negative.</p>
       <p>Bill reminders are shared the same way. A reminder is not spending until you tap Approve, and you can change the date first.</p>
@@ -580,7 +581,7 @@
       <p id="settings-status" role="status"></p>
       <h3>Shared log</h3>
       <p><a class="sheet-link" id="sheet-link" href="https://docs.google.com/spreadsheets/d/15Yk4zozMPdaJEURppm4JmCXb--HyCgOPW8-31RTd_8g/edit" target="_blank" rel="noopener noreferrer">Shared Google Sheet</a></p>
-      <p class="sub">Income and spending saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet. Photos stay on the phone that took them. The other phone sees the receipt file name only.</p>
+      <p class="sub">Income and spending saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet. Photos stay on the phone that took them. A copy goes to the Receipts folder in Google Drive when you save. The other phone sees the receipt file name only.</p>
     </div>
   </div>
 
@@ -611,6 +612,7 @@
   var DB_NAME = "household-money";
   var DB_STORE = "photos";
   var PHOTO_BUDGET = 3 * 1024 * 1024;
+  var RECEIPT_UPLOAD_LIMIT = Math.floor(1.5 * 1024 * 1024);
 
   var entries = [];
   var categories = [];
@@ -1303,6 +1305,121 @@
     });
   }
 
+  function canvasJpeg(blob, maxEdge, quality) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      var url = URL.createObjectURL(blob);
+      img.onload = function () {
+        var w = img.naturalWidth || 1;
+        var h = img.naturalHeight || 1;
+        var scale = Math.min(1, maxEdge / Math.max(w, h));
+        var canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(w * scale));
+        canvas.height = Math.max(1, Math.round(h * scale));
+        var ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(function (out) {
+          if (!out) reject(new Error("Could not shrink photo"));
+          else resolve(out);
+        }, "image/jpeg", quality);
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("Could not shrink photo"));
+      };
+      img.src = url;
+    });
+  }
+
+  function shrinkReceiptForUpload(blob) {
+    if (!blob || blob.size <= RECEIPT_UPLOAD_LIMIT) return Promise.resolve(blob);
+    var steps = [
+      { edge: 1600, q: 0.72 },
+      { edge: 1280, q: 0.6 },
+      { edge: 1024, q: 0.5 },
+      { edge: 800, q: 0.4 },
+      { edge: 640, q: 0.35 }
+    ];
+    var chain = Promise.resolve(blob);
+    steps.forEach(function (step) {
+      chain = chain.then(function (current) {
+        if (!current || current.size <= RECEIPT_UPLOAD_LIMIT) return current;
+        return canvasJpeg(current, step.edge, step.q);
+      });
+    });
+    return chain;
+  }
+
+  function blobToBase64(blob) {
+    return blobToDataUrl(blob).then(function (url) {
+      var text = String(url || "");
+      var i = text.indexOf(",");
+      return i >= 0 ? text.slice(i + 1) : text;
+    });
+  }
+
+  function receiptCopyMessage(ok) {
+    return ok ? "Copy sent to Receipts" : "Saved on this phone. Receipt copy will retry.";
+  }
+
+  function applyReceiptCopyLine(id, ok) {
+    var line = receiptCopyMessage(!!ok);
+    var found = false;
+    entries.forEach(function (e) {
+      if (e && e.id === id) {
+        e.receiptCopy = ok ? "sent" : "retry";
+        found = true;
+      }
+    });
+    if (found) {
+      try { saveEntries(entries); } catch (err) {}
+    }
+    var home = document.getElementById("view-home");
+    if (!home || home.hidden) return;
+    var status = document.getElementById("home-status");
+    if (status) {
+      var cur = status.textContent || "";
+      if (cur.indexOf(line) === -1) status.textContent = cur ? (cur + " " + line) : line;
+    }
+    var esc = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+    var row = document.querySelector('article.entry[data-id="' + esc + '"]');
+    if (!row) return;
+    var slot = row.querySelector(".receipt-copy");
+    if (!slot) {
+      slot = el("div", "receipt-copy", line);
+      var main = row.querySelector(".entry-main");
+      var actions = main && main.querySelector(".row-actions");
+      if (main && actions) main.insertBefore(slot, actions);
+      else if (main) main.appendChild(slot);
+    } else {
+      slot.textContent = line;
+    }
+  }
+
+  function postReceiptCopy(name, blob) {
+    var safeName = String(name || "receipt.jpg").slice(0, 120);
+    return shrinkReceiptForUpload(blob).then(function (small) {
+      return blobToBase64(small).then(function (data) {
+        if (!data || data.indexOf("data:") === 0) return false;
+        var payload = {
+          action: "saveReceipt",
+          token: SHEET_SYNC_TOKEN,
+          name: safeName,
+          mime: (small && small.type) || "image/jpeg",
+          data: data
+        };
+        if (sheetPullSkipped() || !SHEET_SYNC_URL) {
+          try { enqueueSync(payload); } catch (err) {}
+          return false;
+        }
+        return postSync(payload);
+      });
+    }).catch(function () { return false; });
+  }
+
   function blobToDataUrl(blob) {
     return new Promise(function (resolve, reject) {
       var reader = new FileReader();
@@ -1397,6 +1514,9 @@
     if (e.note) meta += " · " + e.note;
     main.appendChild(el("div", "entry-meta", meta));
     if (e.receiptName) main.appendChild(el("div", "receipt-name", e.receiptName));
+    if (e.receiptCopy === "sent" || e.receiptCopy === "retry") {
+      main.appendChild(el("div", "receipt-copy", receiptCopyMessage(e.receiptCopy === "sent")));
+    }
     var actions = el("div", "row-actions");
     var edit = el("button", "delete-btn", "Edit");
     edit.type = "button";
@@ -1971,7 +2091,7 @@
 
   function goHome() {
     if (location.hash !== "#/") location.hash = "#/";
-    route(true);
+    else route(true);
   }
 
   function route(focusHeading) {
@@ -2202,7 +2322,23 @@
         } else {
           pendingHomeNote = "";
         }
+        var uploadName = receiptName;
+        var uploadBlob = photo && photo.blob ? photo.blob : null;
+        var copyPromise = null;
+        if (hasPhoto && uploadName) {
+          if (uploadBlob) copyPromise = postReceiptCopy(uploadName, uploadBlob);
+          else copyPromise = idbGet(id).then(function (rec) {
+            if (!rec || !rec.blob) return null;
+            return postReceiptCopy(uploadName, rec.blob);
+          }).catch(function () { return false; });
+        }
         goHome();
+        if (copyPromise) {
+          copyPromise.then(function (ok) {
+            if (ok == null) return;
+            applyReceiptCopyLine(id, ok);
+          });
+        }
       });
     }).catch(function () {
       err.textContent = "Could not store the photo on this phone. Free some space and try again.";
@@ -3298,7 +3434,22 @@
     savingsAndLeftover: savingsAndLeftover,
     reminderOccurrences: reminderOccurrences,
     ordinalDay: ordinalDay,
-    mergePulledReminders: mergePulledReminders
+    mergePulledReminders: mergePulledReminders,
+    shrinkReceiptForUpload: shrinkReceiptForUpload,
+    receiptUploadPayload: function (blob, name) {
+      return shrinkReceiptForUpload(blob).then(function (small) {
+        return blobToBase64(small).then(function (data) {
+          return {
+            action: "saveReceipt",
+            token: SHEET_SYNC_TOKEN,
+            name: String(name || "receipt.jpg").slice(0, 120),
+            mime: (small && small.type) || "image/jpeg",
+            data: data,
+            bytes: small ? small.size : 0
+          };
+        });
+      });
+    }
   };
 })();
   </script>

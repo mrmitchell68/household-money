@@ -39,7 +39,12 @@ def main():
     assert "the sheet stores the receipt file name" in html
     assert "sent when you open the app online again" in html
     assert "this phone remembers which category you used for that store" in html
-    assert "hm-v1.8.0" in (ROOT / "sw.js").read_text()
+    assert "hm-v1.9.0" in (ROOT / "sw.js").read_text()
+    assert "Copy sent to Receipts" in html
+    assert "Saved on this phone. Receipt copy will retry." in html
+    assert "Take photo" in html and "Choose photo" in html
+    assert "does not open the scanner itself" in html
+    assert "Receipts folder in Google Drive" in html
     assert "Remind me each month" in html
     assert 'id="spend-remind"' in html
     assert "Save reminder" in html
@@ -61,6 +66,8 @@ def main():
         browser = p.chromium.launch(channel="chrome")
         page = browser.new_page(viewport={"width": 412, "height": 915})
         page.route("**/*script.google.com/**", lambda route: route.abort())
+        google_hits = []
+        page.on("request", lambda req: google_hits.append(req.url) if "script.google.com" in req.url or "google.com/macros" in req.url else None)
         page.on("pageerror", lambda err: print("PAGEERROR", err))
         page.goto(URL, wait_until="domcontentloaded")
         page.wait_for_function("() => window.HM && document.querySelector('#week-in')")
@@ -84,6 +91,40 @@ def main():
         assert fname.startswith("receipt-") and fname.endswith(".jpg")
         page.locator("#spend-save").click()
         page.wait_for_function("() => document.querySelector('#week-out').textContent === '$25.00'")
+        page.wait_for_function("() => (document.querySelector('#home-status') && document.querySelector('#home-status').textContent.includes('Saved on this phone. Receipt copy will retry.')) || (document.querySelector('#recent') && document.querySelector('#recent').innerText.includes('Saved on this phone. Receipt copy will retry.'))")
+        receipt_copy = page.evaluate("""(fname) => {
+          const entries = JSON.parse(localStorage.getItem('householdMoney.entries.v1'));
+          const spend = entries.find(e => e.type === 'spending');
+          const queue = JSON.parse(localStorage.getItem('hm.syncQueue') || '[]');
+          const item = queue.find(q => q && q.action === 'saveReceipt');
+          const raw = JSON.stringify(spend);
+          return {
+            copy: spend && spend.receiptCopy,
+            hasDataField: !!(spend && Object.prototype.hasOwnProperty.call(spend, 'data')),
+            rawHasImage: raw.indexOf('data:image') !== -1 || (raw.length > 5000),
+            queued: !!item,
+            action: item && item.action,
+            name: item && item.name,
+            mime: item && item.mime,
+            token: item && item.token,
+            dataPrefix: item && typeof item.data === 'string' ? item.data.slice(0, 5) : '',
+            dataLen: item && item.data ? item.data.length : 0,
+            hasKind: !!(item && item.kind)
+          };
+        }""", fname)
+        print("RECEIPT_COPY", {k: receipt_copy[k] for k in receipt_copy if k != 'dataPrefix'}, "PREFIX", receipt_copy["dataPrefix"], "GOOGLE", google_hits)
+        assert google_hits == []
+        assert receipt_copy["copy"] == "retry"
+        assert receipt_copy["hasDataField"] is False
+        assert receipt_copy["rawHasImage"] is False
+        assert receipt_copy["queued"] is True
+        assert receipt_copy["action"] == "saveReceipt"
+        assert receipt_copy["name"] == fname
+        assert receipt_copy["mime"] == "image/jpeg"
+        assert receipt_copy["token"] == "hm-7k3p9q2m4n8r"
+        assert receipt_copy["dataPrefix"] != "data:"
+        assert receipt_copy["dataLen"] > 20
+        assert receipt_copy["hasKind"] is False
 
         totals = {k: text(page, "#" + k) for k in ("week-in", "week-out", "week-left", "month-in", "month-out", "month-left")}
         print("BEFORE_RELOAD", totals)
@@ -635,6 +676,43 @@ def main():
           const hits = entries.filter(e => e.note === 'edit savings');
           return hits.length === 1 && hits[0].amountCents === -1200 && hits[0].who === 'Mitch' && hits[0].synced === false;
         }""")
+        shrunk = page.evaluate("""() => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 900;
+          canvas.height = 900;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, 900, 900);
+          ctx.fillStyle = '#222';
+          ctx.fillRect(40, 40, 200, 80);
+          return new Promise((resolve, reject) => {
+            canvas.toBlob(async (blob) => {
+              try {
+                const padded = new Blob([blob, new Uint8Array(1700000)], { type: 'image/jpeg' });
+                const payload = await HM.receiptUploadPayload(padded, 'receipt-big.jpg');
+                resolve({
+                  before: padded.size,
+                  after: payload.bytes,
+                  action: payload.action,
+                  mime: payload.mime,
+                  name: payload.name,
+                  prefix: payload.data.slice(0, 5),
+                  limit: Math.floor(1.5 * 1024 * 1024)
+                });
+              } catch (err) {
+                reject(err);
+              }
+            }, 'image/jpeg', 0.9);
+          });
+        }""")
+        print("SHRINK", shrunk, "GOOGLE_END", google_hits)
+        assert google_hits == []
+        assert shrunk["before"] > shrunk["limit"]
+        assert shrunk["after"] <= shrunk["limit"]
+        assert shrunk["action"] == "saveReceipt"
+        assert shrunk["mime"] == "image/jpeg"
+        assert shrunk["name"] == "receipt-big.jpg"
+        assert shrunk["prefix"] != "data:"
         browser.close()
     print("PASS")
 
