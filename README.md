@@ -21,15 +21,17 @@ After the first online open, the page works offline. Income, spending, categorie
 - This week and this month: Money in, Money out, and Left (in minus out).
 - Add income for Mitch or Tonya. Add spending in a category. Add your own categories.
 - Take a receipt photo or pick one from the gallery. It is stored on the phone. Tap it to view it, then **Save photo** to put a copy in your files.
+- A receipt photo fills in the amount, store, and date. The category guess uses this phone's per-store memory first, then a small learner trained on all synced entries (both phones), the words read from past receipts on this phone, and corrections, then common store names. It only picks categories in your list and asks when unsure.
 - Delete one entry at a time. Deleting a category does not delete old entries.
 - Settings → **Export backup** / **Import backup**. Import matches entries by id and does not duplicate them.
 
 ## Tests
 
 ```bash
-python3 -m http.server 8767
+python3 -m http.server 8788 --bind 127.0.0.1
 # from this folder, in another terminal:
 /workspace/.venv-tjl/bin/python tests/test_app.py
+/workspace/.venv-tjl/bin/python tests/test_scan.py   # receipt date + category + scan flow
 ```
 
 The test uses a temporary browser profile. It does not put sample entries in the app.

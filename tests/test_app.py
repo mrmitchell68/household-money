@@ -39,7 +39,7 @@ def main():
     assert "the sheet stores the receipt file name" in html
     assert "sent when you open the app online again" in html
     assert "this phone remembers which category you used for that store" in html
-    assert "hm-v1.9.0" in (ROOT / "sw.js").read_text()
+    assert "hm-v1.10.0" in (ROOT / "sw.js").read_text()
     assert "Copy sent to Receipts" in html
     assert "Saved on this phone. Receipt copy will retry." in html
     assert "Take photo" in html and "Choose photo" in html

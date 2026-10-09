@@ -572,7 +572,7 @@
       </ol>
       <h3>Backup</h3>
       <p>Income, spending, and categories saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet. When the phone is online, new income and spending are also added to the shared Google Sheet, under the category you picked. Photos stay on the phone that took them. When you save a spending entry that has a photo, a copy is also sent to the Receipts folder in Google Drive. The other phone sees the receipt file name only, and the sheet stores the receipt file name, not the photo. If the phone is offline, the entry is saved here and sent when you open the app online again. Export a backup if you want a file of what is saved here. Import merges by entry id and does not duplicate entries already on this phone.</p>
-      <p>A receipt photo can fill in the amount and store, and this phone remembers which category you used for that store.</p>
+      <p>A receipt photo can fill in the amount, store, and date, and this phone remembers which category you used for that store. For a store it has not seen, it guesses a category from your past entries on both phones and from common store names. You can always change the date and category before you save, and a change teaches it for next time.</p>
       <p>Savings you put aside or take out is saved the same way and is not counted as spending. What is left after income, spending, and savings carries to the next month, even if it is negative.</p>
       <p>Bill reminders are shared the same way. A reminder is not spending until you tap Approve, and you can change the date first.</p>
       <button class="btn btn-primary btn-block" id="export-backup" type="button">Export backup</button>
@@ -932,31 +932,6 @@
     return "";
   }
 
-  function guessCategory(text, categories, learned) {
-    var hay = normalizeLearnedKey(text);
-    if (!hay) return null;
-    var cats = Array.isArray(categories) ? categories : [];
-    var map = learned && typeof learned === "object" && !Array.isArray(learned) ? learned : null;
-    if (map) {
-      var keys = Object.keys(map);
-      keys.sort(function (a, b) { return b.length - a.length; });
-      for (var i = 0; i < keys.length; i++) {
-        var rawKey = keys[i];
-        var key = normalizeLearnedKey(rawKey);
-        if (key.length < 3) continue;
-        if (!hasPhrase(hay, key)) continue;
-        var hit = categoryByName(map[rawKey], cats);
-        if (hit) return hit;
-      }
-    }
-    for (var j = 0; j < STARTER_MAP.length; j++) {
-      var cat = categoryByName(STARTER_MAP[j][1], cats);
-      if (!cat) continue;
-      if (hasPhrase(hay, STARTER_MAP[j][0])) return cat;
-    }
-    return null;
-  }
-
   function loadLearned() {
     try {
       var obj = JSON.parse(localStorage.getItem(KEY_LEARNED) || "{}");
@@ -1006,6 +981,331 @@
     } catch (e) {}
   }
 
+  var KEY_SCAN_TOKENS = "hm.scanTokens.v1";
+  var KEY_CAT_FIXES = "hm.catFixes.v1";
+  var SCAN_TOKENS_CAP = 400;
+  var CAT_FIXES_CAP = 200;
+
+  // Store and item words for stores the phone has not seen yet. Longer phrases are matched first
+  // and removed, so "lowes foods" is groceries and "piedmont natural gas" is a utility.
+  var CATEGORY_CONCEPTS = [
+    { id: "gas", label: "gas", names: ["gas", "fuel", "gasoline", "gas station"],
+      stores: ["shell", "exxon", "exxonmobil", "mobil", "bp", "sunoco", "wawa", "speedway", "circle k", "sheetz", "quiktrip", "racetrac", "marathon", "chevron", "texaco", "citgo", "valero", "pilot travel", "pilot flying j", "flying j", "loves travel", "love s travel", "murphy usa", "murphy express", "sams fuel", "sam s fuel", "costco gas", "kroger fuel", "7 eleven", "sinclair", "phillips 66", "conoco", "casey s", "kwik trip", "thorntons", "gate petroleum", "gulf"],
+      items: ["gallons", "unleaded", "regular unl", "unl reg", "diesel", "fuel", "pump", "price gal", "gas"] },
+    { id: "groceries", label: "groceries", names: ["groceries", "grocery", "food"],
+      stores: ["kroger", "aldi", "publix", "food lion", "ingles", "harris teeter", "lowes foods", "lidl", "safeway", "giant food", "weis", "wegmans", "piggly wiggly", "winn dixie", "sprouts", "trader joe s", "whole foods", "heb", "h e b", "meijer", "save a lot", "grocery outlet", "bi lo", "food city", "hy vee", "stop shop", "shoprite", "walmart grocery", "walmart neighborhood market", "neighborhood market", "costco wholesale", "sam s club"],
+      items: ["milk", "eggs", "egg", "bread", "banana", "bananas", "produce", "cheese", "chicken", "beef", "ground beef", "pork", "cereal", "grocery", "deli", "bakery", "frozen", "yogurt", "butter", "apples", "potatoes", "lettuce", "tomatoes", "onions", "rice", "pasta", "sugar", "flour", "juice", "snacks", "chips", "soda", "bacon", "sausage", "coffee", "creamer", "fruit", "vegetables", "meat", "seafood", "dairy"] },
+    { id: "hardware", label: "hardware", names: ["hardware", "home improvement", "home repair", "home repairs", "tools", "building material", "building materials", "building", "repairs", "maintenance", "home", "house"],
+      stores: ["home depot", "the home depot", "lowe s", "lowes", "lowes home", "ace hardware", "ace", "menards", "true value", "harbor freight", "tractor supply", "northern tool", "84 lumber", "do it best", "sherwin williams"],
+      items: ["lumber", "plywood", "screws", "screw", "nails", "drywall", "paint", "hardware", "pvc", "fitting", "2x4", "caulk", "hinge", "bolts", "washer", "drill", "blade", "pipe", "valve", "flange", "wire", "outlet", "breaker", "concrete", "mortar"] },
+    { id: "medical", label: "medical", names: ["medical", "pharmacy", "health", "doctor", "doctors", "healthcare"],
+      stores: ["cvs", "cvs pharmacy", "walgreens", "rite aid", "pharmacy", "urgent care", "hospital", "clinic", "dental", "dentist", "pediatrics", "physician", "labcorp", "quest diagnostics", "optometry", "eye care", "family medicine", "orthodontics"],
+      items: ["rx", "prescription", "copay", "co pay", "patient", "pharmacist", "refill", "medication"] },
+    { id: "online", label: "online shopping", names: ["online", "online shopping", "shopping"],
+      stores: ["amazon", "amazon com", "amzn", "amzn mktp", "ebay", "walmart com", "facebook marketplace", "fb marketplace", "etsy", "temu", "shein", "wayfair", "paypal"],
+      items: ["order number", "order total", "shipped", "shipping", "ship to", "delivery", "seller", "marketplace", "tracking"] },
+    { id: "phones", label: "phone bill", names: ["phones", "phone", "cell phone", "cell", "wireless", "mobile"],
+      stores: ["verizon", "verizon wireless", "t mobile", "tmobile", "at t", "att", "cricket", "cricket wireless", "boost mobile", "metro by t mobile", "metropcs", "straight talk", "tracfone", "us cellular", "consumer cellular", "mint mobile", "spectrum mobile", "xfinity mobile"],
+      items: ["wireless", "line access", "data plan", "talk text", "device payment"] },
+    { id: "utilities", label: "utilities", names: ["utilities", "utility", "electric", "power", "water", "bills"],
+      stores: ["duke energy", "dominion energy", "georgia power", "piedmont natural gas", "natural gas", "electric cooperative", "water resources", "water department", "waste management", "republic services", "spectrum", "comcast", "xfinity", "brightspeed", "frontier communications", "energy united"],
+      items: ["kwh", "utility", "meter", "service address", "electric", "electric service", "water", "water service", "sewer", "trash", "internet"] },
+    { id: "dining", label: "eating out", names: ["restaurants", "restaurant", "dining", "dining out", "eating out", "fast food", "food"],
+      stores: ["mcdonald s", "mcdonalds", "chick fil a", "wendy s", "burger king", "taco bell", "subway", "starbucks", "dunkin", "bojangles", "cook out", "zaxby s", "domino s", "papa john s", "pizza hut", "waffle house", "cracker barrel", "applebee s", "chili s", "sonic", "arby s", "hardee s", "kfc", "popeyes", "golden corral", "texas roadhouse", "olive garden"],
+      items: ["restaurant", "grill", "cafe", "tip", "gratuity", "server", "table", "dine in", "drive thru", "take out", "combo", "burger", "fries"] },
+    { id: "tithes", label: "tithes", names: ["tithes", "tithe", "church", "giving", "offering"],
+      stores: ["church", "ministries", "ministry", "baptist", "methodist", "tithe", "tithely", "pushpay"],
+      items: ["offering", "tithe", "donation", "giving"] },
+    { id: "mortgage", label: "mortgage", names: ["mortgage", "house payment", "home loan"],
+      stores: ["mortgage", "rocket mortgage", "mr cooper", "loan servicing", "loancare", "freedom mortgage", "pennymac", "newrez"],
+      items: ["escrow", "principal", "mortgage"] },
+    { id: "car", label: "car payment", names: ["car payment", "car", "auto loan", "truck payment"],
+      stores: ["auto loan", "ally", "ally financial", "gm financial", "toyota financial", "honda financial", "ford credit", "carmax auto finance", "santander consumer", "credit acceptance", "westlake financial"],
+      items: ["vehicle", "vin", "auto loan"] },
+    { id: "cards", label: "credit card", names: ["cards", "credit card", "credit cards", "card"],
+      stores: ["capital one", "discover card", "synchrony", "credit one", "citi card", "chase card", "american express"],
+      items: ["credit card payment", "minimum payment", "statement balance", "card payment"] }
+  ];
+
+  var LEARN_STOP = {};
+  ("the and for with your you our are was have this that from will not all any per each each of to in on at by an a is it be as or " +
+   "total subtotal sub tax taxes visa mastercard amex discover debit credit card cash change thank thanks receipt store date time items item qty " +
+   "price amount approved approval auth ref trans tran transaction sale purchase customer copy www com http https tel phone manager mgr cashier " +
+   "register reg terminal term chip entry method account acct number balance due payment pay paid survey rewards member save saved savings " +
+   "return returns policy days receipt invoice order st rd ave hwy road street suite usd net ttl tend tendered aid id code pin verified signature " +
+   "welcome store customer open hours today please again visit www online barcode seq batch merchant mid tid emv contactless").split(/\s+/).forEach(function (w) {
+    if (w) LEARN_STOP[w] = true;
+  });
+
+  function isSeedMemory(key, category, cats) {
+    for (var i = 0; i < STARTER_MAP.length; i++) {
+      if (STARTER_MAP[i][0] !== key) continue;
+      return String(categoryByName(STARTER_MAP[i][1], cats) || STARTER_MAP[i][1]).toLowerCase() === String(category || "").toLowerCase();
+    }
+    return false;
+  }
+
+  function memoryGuess(hay, cats, map, wantSeed) {
+    if (!map) return "";
+    var keys = Object.keys(map);
+    keys.sort(function (a, b) { return b.length - a.length; });
+    for (var i = 0; i < keys.length; i++) {
+      var rawKey = keys[i];
+      var key = normalizeLearnedKey(rawKey);
+      if (key.length < 3) continue;
+      if (!hasPhrase(hay, key)) continue;
+      var hit = categoryByName(map[rawKey], cats);
+      if (!hit) continue;
+      if (isSeedMemory(key, hit, cats) !== !!wantSeed) continue;
+      return hit;
+    }
+    return "";
+  }
+
+  function amountBucket(cents) {
+    var n = Number(cents);
+    if (!isFinite(n) || n <= 0) return "";
+    var edges = [1000, 2500, 5000, 10000, 25000, 50000, 100000];
+    for (var i = 0; i < edges.length; i++) if (n < edges[i]) return "amt:" + i;
+    return "amt:" + edges.length;
+  }
+
+  function learnTokens(text, maxLines) {
+    var lines = String(text || "").split(/\r?\n/);
+    if (maxLines) lines = lines.slice(0, maxLines);
+    var seen = {};
+    var out = [];
+    lines.forEach(function (line) {
+      var words = normalizeLearnedKey(line).split(" ");
+      var kept = [];
+      words.forEach(function (w) {
+        if (w.length < 3 || /^\d+$/.test(w) || LEARN_STOP[w] || /\d{3,}/.test(w)) { kept.push(null); return; }
+        kept.push(w);
+      });
+      for (var i = 0; i < kept.length; i++) {
+        var w = kept[i];
+        if (!w) continue;
+        if (!seen[w]) { seen[w] = true; out.push(w); }
+        var nx = kept[i + 1];
+        if (nx) {
+          var bi = w + " " + nx;
+          if (!seen[bi]) { seen[bi] = true; out.push(bi); }
+        }
+      }
+    });
+    return out.slice(0, 120);
+  }
+
+  function loadJsonKey(key, fallback) {
+    try {
+      var v = JSON.parse(localStorage.getItem(key) || "null");
+      return v == null ? fallback : v;
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  function trainLearner(list, cats, extra) {
+    var model = { cats: {}, df: {}, docs: 0 };
+    var scanTokens = (extra && extra.scanTokens) || {};
+    var fixes = (extra && extra.fixes) || [];
+    function addDoc(tokens, category, weight) {
+      var cat = categoryByName(category, cats);
+      if (!cat || !tokens.length) return;
+      var w = weight || 1;
+      var bucket = model.cats[cat] || (model.cats[cat] = { n: 0, t: {} });
+      bucket.n += w;
+      model.docs += w;
+      var seen = {};
+      tokens.forEach(function (tok) {
+        if (!tok || seen[tok]) return;
+        seen[tok] = true;
+        bucket.t[tok] = (bucket.t[tok] || 0) + w;
+        model.df[tok] = (model.df[tok] || 0) + w;
+      });
+    }
+    (list || []).forEach(function (e) {
+      if (!e || e.type !== "spending" || !e.category) return;
+      var tokens = learnTokens(e.note || "");
+      var scanned = scanTokens[e.id];
+      if (typeof scanned === "string" && scanned) tokens = tokens.concat(scanned.split("|"));
+      if (!tokens.length) return;
+      var b = amountBucket(e.amountCents);
+      if (b) tokens.push(b);
+      addDoc(tokens, e.category, 1);
+    });
+    (Array.isArray(fixes) ? fixes : []).forEach(function (f) {
+      if (!f || !f.c || typeof f.t !== "string") return;
+      addDoc(f.t.split("|"), f.c, 2);
+    });
+    return model;
+  }
+
+  function predictLearner(model, tokens, cats) {
+    if (!model || !model.docs || !tokens || !tokens.length) return null;
+    var names = Object.keys(model.cats).filter(function (c) { return !!categoryByName(c, cats); });
+    if (!names.length) return null;
+    var scores = {};
+    names.forEach(function (c) { scores[c] = 0; });
+    var evidence = 0;
+    var used = {};
+    tokens.forEach(function (tok) {
+      if (!tok || used[tok]) return;
+      used[tok] = true;
+      var df = model.df[tok];
+      if (!df) return;
+      var best = 0;
+      names.forEach(function (c) {
+        var share = (model.cats[c].t[tok] || 0) / df;
+        if (share > best) best = share;
+      });
+      var w = best * best * Math.min(1, df / 2);
+      if (tok.indexOf("amt:") === 0) w *= 0.25;
+      else if (tok.indexOf(" ") !== -1) w *= 1.5;
+      if (w <= 0) return;
+      if (tok.indexOf("amt:") !== 0) evidence += w;
+      names.forEach(function (c) {
+        scores[c] += w * ((model.cats[c].t[tok] || 0) / df);
+      });
+    });
+    var sum = 0;
+    names.forEach(function (c) { sum += scores[c]; });
+    if (sum <= 0) return null;
+    names.sort(function (a, b) { return scores[b] - scores[a]; });
+    var top = names[0];
+    var conf = scores[top] / sum;
+    var second = names.length > 1 ? scores[names[1]] / sum : 0;
+    return { category: categoryByName(top, cats), confidence: conf, margin: conf - second, evidence: evidence };
+  }
+
+  function conceptCategory(concept, cats) {
+    for (var i = 0; i < concept.names.length; i++) {
+      var want = normalizeLearnedKey(concept.names[i]);
+      for (var j = 0; j < cats.length; j++) {
+        if (normalizeLearnedKey(cats[j]) === want) return cats[j];
+      }
+    }
+    for (var k = 0; k < concept.names.length; k++) {
+      var w = normalizeLearnedKey(concept.names[k]);
+      if (w.length < 4) continue;
+      for (var m = 0; m < cats.length; m++) {
+        var c = normalizeLearnedKey(cats[m]);
+        if (concept.id !== "car" && c === "car payment") continue;
+        if (hasPhrase(c, w)) return cats[m];
+      }
+    }
+    return "";
+  }
+
+  function conceptGuess(text, cats) {
+    var lines = String(text || "").split(/\r?\n/);
+    var head = " " + normalizeLearnedKey(lines.slice(0, 8).join(" ")) + " ";
+    var all = " " + normalizeLearnedKey(lines.join(" ")) + " ";
+    var phrases = [];
+    CATEGORY_CONCEPTS.forEach(function (concept, ci) {
+      concept.stores.forEach(function (p) { phrases.push({ p: normalizeLearnedKey(p), ci: ci, store: true }); });
+      concept.items.forEach(function (p) { phrases.push({ p: normalizeLearnedKey(p), ci: ci, store: false }); });
+    });
+    phrases.sort(function (a, b) { return b.p.length - a.p.length; });
+    var score = {};
+    var storeHit = {};
+    phrases.forEach(function (ph) {
+      if (!ph.p) return;
+      var needle = " " + ph.p + " ";
+      if (ph.store) {
+        // Short brand names (bp, ace, gulf, ally) only count near the top, where the store name is printed.
+        var where = ph.p.length <= 4 ? head : all;
+        if (where.indexOf(needle) === -1) return;
+        score[ph.ci] = (score[ph.ci] || 0) + (head.indexOf(needle) !== -1 ? 4 : 3);
+        storeHit[ph.ci] = true;
+        head = head.split(needle).join(" ");
+        all = all.split(needle).join(" ");
+      } else {
+        if (all.indexOf(needle) === -1) return;
+        score[ph.ci] = (score[ph.ci] || 0) + 1;
+        all = all.split(needle).join(" ");
+      }
+    });
+    var ids = Object.keys(score);
+    if (!ids.length) return null;
+    ids.sort(function (a, b) { return score[b] - score[a]; });
+    var top = Number(ids[0]);
+    var topScore = score[ids[0]];
+    var secondScore = ids.length > 1 ? score[ids[1]] : 0;
+    if (topScore < 2 || topScore - secondScore < 1) return null;
+    var concept = CATEGORY_CONCEPTS[top];
+    return { concept: concept.id, label: concept.label, category: conceptCategory(concept, cats), score: topScore, store: !!storeHit[top] };
+  }
+
+  // Order: this phone's per-store memory, then the learner trained on all synced entries,
+  // then built-in store words, then the starter list. Only categories in the user's list are returned.
+  function suggestCategory(text, cats, opts) {
+    var o = opts || {};
+    var list = Array.isArray(cats) ? cats : [];
+    var hay = normalizeLearnedKey(text);
+    if (!hay) return null;
+    var map = o.learned && typeof o.learned === "object" && !Array.isArray(o.learned) ? o.learned : null;
+    var mem = memoryGuess(hay, list, map, false);
+    if (mem) return { category: mem, source: "memory", confidence: 1 };
+    var tokens = learnTokens(text, 60);
+    var bucket = amountBucket(o.amountCents);
+    if (bucket) tokens.push(bucket);
+    var learned = o.model ? predictLearner(o.model, tokens, list) : null;
+    var concept = conceptGuess(text, list);
+    if (learned && learned.category && learned.confidence >= 0.6 && learned.margin >= 0.25 && learned.evidence >= 0.9) {
+      if (!(concept && concept.store && concept.category && concept.category !== learned.category && learned.confidence < 0.8)) {
+        return { category: learned.category, source: "learned", confidence: learned.confidence };
+      }
+    }
+    if (concept && concept.category) return { category: concept.category, source: "store", confidence: 0.7, concept: concept.concept };
+    var seed = memoryGuess(hay, list, map, true);
+    if (!seed) {
+      for (var j = 0; j < STARTER_MAP.length; j++) {
+        var cat = categoryByName(STARTER_MAP[j][1], list);
+        if (cat && hasPhrase(hay, STARTER_MAP[j][0])) { seed = cat; break; }
+      }
+    }
+    if (seed) return { category: seed, source: "starter", confidence: 0.6 };
+    if (concept) return { category: null, source: "concept", confidence: 0, concept: concept.concept, label: concept.label };
+    return null;
+  }
+
+  function guessCategory(text, categories, learned, model, amountCents) {
+    var s = suggestCategory(text, categories, { learned: learned, model: model, amountCents: amountCents });
+    return s && s.category ? s.category : null;
+  }
+
+  function currentLearner() {
+    return trainLearner(entries, categories, {
+      scanTokens: loadJsonKey(KEY_SCAN_TOKENS, {}),
+      fixes: loadJsonKey(KEY_CAT_FIXES, [])
+    });
+  }
+
+  function rememberScanTokens(id, tokens) {
+    if (!id || !tokens || !tokens.length) return;
+    try {
+      var store = loadJsonKey(KEY_SCAN_TOKENS, {});
+      if (!store || typeof store !== "object" || Array.isArray(store)) store = {};
+      delete store[id];
+      store[id] = tokens.filter(function (t) { return t && t.indexOf("amt:") !== 0; }).slice(0, 80).join("|");
+      var ids = Object.keys(store);
+      while (ids.length > SCAN_TOKENS_CAP) { delete store[ids.shift()]; }
+      localStorage.setItem(KEY_SCAN_TOKENS, JSON.stringify(store));
+    } catch (e) {}
+  }
+
+  function rememberCategoryFix(tokens, fromCat, toCat) {
+    if (!tokens || !tokens.length || !toCat || fromCat === toCat) return;
+    try {
+      var list = loadJsonKey(KEY_CAT_FIXES, []);
+      if (!Array.isArray(list)) list = [];
+      list.push({ t: tokens.filter(function (t) { return t && t.indexOf("amt:") !== 0; }).slice(0, 80).join("|"), c: toCat, from: fromCat || "", at: todayYMD() });
+      while (list.length > CAT_FIXES_CAP) list.shift();
+      localStorage.setItem(KEY_CAT_FIXES, JSON.stringify(list));
+    } catch (e) {}
+  }
+
   function moneyOnLine(line) {
     var s = String(line || "").replace(/,/g, "");
     var matches = s.match(/\$?\d+\.\d{2}/g);
@@ -1047,18 +1347,83 @@
     return yy + "-" + pad(mm) + "-" + pad(dd);
   }
 
-  function extractDate(text) {
-    var t = String(text || "");
-    var iso = t.match(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
-    if (iso) return validYMD(iso[1], iso[2], iso[3]);
-    var us = t.match(/\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b/);
-    if (!us) return "";
-    var year = us[3];
-    if (year.length === 2) {
-      var yy = Number(year);
-      year = String(yy >= 70 ? 1900 + yy : 2000 + yy);
+  var MONTH_RE = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
+  var MONTH_INDEX = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+
+  function fullYear(y) {
+    var s = String(y);
+    if (s.length === 2) return 2000 + Number(s);
+    return Number(s);
+  }
+
+  function dateLineScore(line, prev) {
+    var l = String(line || "").toLowerCase();
+    var p = String(prev || "").toLowerCase();
+    var score = 0;
+    if (/\b(exp|expir\w*|expires?|valid|thru|through|good until|use by|best by|best before|offer ends|coupon|return\w*|refund\w*|exchange|warranty|birth|dob|member since|since|ends)\b/.test(l)) score -= 20;
+    else if (/\b(due|pay by|payment due)\b/.test(l)) score -= 6;
+    if (/\b(date|dated|trans\w*|txn|sale|sold|purchased?|order(ed)?|invoice|statement|bill|service|visit|time|dt)\b/.test(l)) score += 4;
+    if (/(date|trans\w*|sale|purchase)\s*:?\s*$/.test(p) && p.length < 30) score += 3;
+    if (/\b(expir\w*|expires?|return policy|returns? by|return by|valid thru|use by|best by)\b/.test(p)) score -= 15;
+    return score;
+  }
+
+  function receiptDateCandidates(text, now) {
+    var today = now || new Date();
+    var maxDay = todayYMD(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1));
+    var minDay = todayYMD(new Date(today.getFullYear() - 1, today.getMonth(), today.getDate() - 1));
+    var fixed = String(text || "").replace(/(^|[^A-Za-z0-9])([0-9Oo]{1,4}[\/\-.][0-9Oo]{1,2}[\/\-.][0-9Oo]{2,4})(?![A-Za-z0-9])/g, function (m, pre, d) {
+      return /\d/.test(d) ? pre + d.replace(/[Oo]/g, "0") : m;
+    });
+    var lines = fixed.split(/\r?\n/);
+    var out = [];
+    function push(y, m, d, bonus, lineIdx) {
+      var ymd = validYMD(y, m, d);
+      if (!ymd) return false;
+      if (ymd > maxDay || ymd < minDay) return false;
+      out.push({ date: ymd, score: bonus + dateLineScore(lines[lineIdx], lines[lineIdx - 1]), line: lineIdx });
+      return true;
     }
-    return validYMD(year, us[1], us[2]);
+    lines.forEach(function (line, i) {
+      var m;
+      var iso = /(^|[^\d])(20\d{2})[-\/.](\d{1,2})[-\/.](\d{1,2})(?!\d)/g;
+      while ((m = iso.exec(line))) push(m[2], m[3], m[4], 2, i);
+      var us = /(^|[^\d\/\-.])(\d{1,2})\s?([-\/.])\s?(\d{1,2})\s?\3\s?(\d{4}|\d{2})(?![\d.])/g;
+      while ((m = us.exec(line))) {
+        if (m[3] === "." && /\s/.test(m[0].slice(m[1].length))) continue;
+        var year = fullYear(m[5]);
+        var bonus = m[5].length === 4 ? 1 : 0;
+        if (!push(year, m[2], m[4], bonus, i) && Number(m[2]) > 12) push(year, m[4], m[2], bonus - 1, i);
+      }
+      var named = new RegExp("\\b" + MONTH_RE + "(?![a-z])\\.?\\s*(\\d{1,2})(?:st|nd|rd|th)?(?!\\d)(?:,?\\s*(\\d{4}|'?\\d{2})(?!\\d))?", "gi");
+      while ((m = named.exec(line))) {
+        var mon = MONTH_INDEX[m[1].slice(0, 3).toLowerCase()];
+        var yr;
+        var b = 1;
+        if (m[3]) yr = fullYear(m[3].replace("'", ""));
+        else {
+          yr = today.getFullYear();
+          if (validYMD(yr, mon, m[2]) > maxDay) yr -= 1;
+          b = 0;
+        }
+        push(yr, mon, m[2], b, i);
+      }
+      var dmy = new RegExp("(?:^|[^a-z0-9])(\\d{1,2})[\\s\\-]?" + MONTH_RE + "(?![a-z])\\.?[\\s\\-,]*(\\d{4}|\\d{2})(?!\\d)", "gi");
+      while ((m = dmy.exec(line))) {
+        push(fullYear(m[3]), MONTH_INDEX[m[2].slice(0, 3).toLowerCase()], m[1], 1, i);
+      }
+    });
+    return out;
+  }
+
+  function extractDate(text, now) {
+    var list = receiptDateCandidates(text, now);
+    var best = null;
+    list.forEach(function (c) {
+      if (c.score <= -5) return;
+      if (!best || c.score > best.score) best = c;
+    });
+    return best ? best.date : "";
   }
 
   function extractMerchant(text) {
@@ -1117,20 +1482,43 @@
     if (merchant && spendPhoto) spendPhoto.merchant = merchant;
     if (!String(noteEl.value || "").trim() && merchant) noteEl.value = merchant.slice(0, 200);
     var today = todayYMD();
+    var dateMsg = "";
     if (!dateEl.value || dateEl.value === today) {
       var found = extractDate(cleaned);
-      if (found) dateEl.value = found;
+      if (found) {
+        dateEl.value = found;
+        dateMsg = "Date from the receipt: " + formatEntryDate(found) + ".";
+      } else {
+        if (!dateEl.value) dateEl.value = today;
+        dateMsg = "No date found on the receipt, so the date is today.";
+      }
     }
     var picked = document.querySelector('#cat-chips input[name="category"]:checked');
-    var guess = guessCategory(cleaned, categories, loadLearned());
+    var suggestion = null;
+    try {
+      suggestion = suggestCategory(cleaned, categories, {
+        learned: loadLearned(),
+        model: currentLearner(),
+        amountCents: parseCents(amountEl.value)
+      });
+    } catch (e) {
+      suggestion = null;
+    }
+    var guess = suggestion && suggestion.category ? suggestion.category : "";
+    if (spendPhoto) {
+      spendPhoto.scanTokens = learnTokens(cleaned, 60);
+      spendPhoto.guess = guess;
+    }
+    var catMsg = "";
     if (guess) {
       if (!picked) checkCategory(guess);
-      setReceiptHint("This looks like " + guess + ". Change it if that's wrong.");
+      catMsg = "This looks like " + guess + ". Change it if that's wrong.";
     } else if (!picked) {
-      setReceiptHint("Which category is this?");
-    } else {
-      setReceiptHint("");
+      catMsg = suggestion && suggestion.label
+        ? "This looks like " + suggestion.label + ", but that isn't one of your categories. Which category is this?"
+        : "Which category is this?";
     }
+    setReceiptHint([dateMsg, catMsg].filter(function (x) { return !!x; }).join(" "));
   }
 
   function assetUrl(path) {
@@ -2308,6 +2696,10 @@
         }
         saveEntries(entries);
         rememberSpend(note, picked.value, photo && photo.merchant);
+        if (photo && photo.scanTokens && photo.scanTokens.length) {
+          rememberScanTokens(id, photo.scanTokens);
+          if (photo.guess && photo.guess !== picked.value) rememberCategoryFix(photo.scanTokens, photo.guess, picked.value);
+        }
         syncEntry(entry);
         if (remindOn) {
           saveSpendReminder({
@@ -3429,6 +3821,13 @@
     formatUSD: formatUSD,
     DEFAULT_CATEGORIES: DEFAULT_CATEGORIES,
     guessCategory: guessCategory,
+    suggestCategory: suggestCategory,
+    trainLearner: trainLearner,
+    predictLearner: predictLearner,
+    learnTokens: learnTokens,
+    extractDate: extractDate,
+    extractMerchant: extractMerchant,
+    currentLearner: currentLearner,
     extractAmount: extractAmount,
     mergeCategoryLists: mergeCategoryLists,
     savingsAndLeftover: savingsAndLeftover,
