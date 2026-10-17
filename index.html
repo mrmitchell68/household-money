@@ -71,6 +71,13 @@
     .num.in { color: var(--green); }
     .num.out { color: var(--out); }
     .num.neg { color: var(--out); }
+    .week-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .week-nav h1 { margin: 0; text-align: center; flex: 1; font-size: 1.2rem; }
+    .week-nav .btn[disabled] { opacity: .4; }
+    #week-past-wrap { margin-top: 8px; }
+    .week-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr; gap: 4px; font-size: .8rem; padding: 4px 0; border-top: 1px solid rgba(127,127,127,.2); }
+    .week-row.head { font-weight: 600; border-top: 0; }
+    .week-row .neg { color: var(--out); }
     .dock {
       position: fixed;
       left: 0; right: 0; bottom: 0;
@@ -294,13 +301,24 @@
       <div id="due-list" aria-live="polite"></div>
       <p class="hint" id="home-status" aria-live="polite"></p>
       <section class="panel" aria-labelledby="week-title">
-        <h1 id="week-title">This week</h1>
-        <p class="sub" id="week-range">Monday through today</p>
-        <div class="stats">
-          <div class="stat"><div class="label">Money in</div><div class="num in" id="week-in">$0.00</div></div>
-          <div class="stat"><div class="label">Money out</div><div class="num out" id="week-out">$0.00</div></div>
-          <div class="stat"><div class="label">Left</div><div class="num" id="week-left">$0.00</div></div>
+        <div class="week-nav">
+          <button class="btn" id="week-prev" type="button" aria-label="Previous week">&lsaquo; Prev</button>
+          <h1 id="week-title">This week</h1>
+          <button class="btn" id="week-next" type="button" aria-label="Next week">Next &rsaquo;</button>
         </div>
+        <p class="sub" id="week-range">Monday through Sunday</p>
+        <div class="stats quad">
+          <div class="stat"><div class="label">Starting balance</div><div class="num" id="week-start">$0.00</div></div>
+          <div class="stat"><div class="label">Ending balance</div><div class="num" id="week-end">$0.00</div></div>
+          <div class="stat"><div class="label">Income this week</div><div class="num in" id="week-in">$0.00</div></div>
+          <div class="stat"><div class="label">Spending this week</div><div class="num out" id="week-out">$0.00</div></div>
+        </div>
+        <p class="sub">Weeks run Monday through Sunday. Income and spending start over each Monday. The ending balance (plus or minus) rolls into next week's starting balance.</p>
+        <span id="week-left" hidden>$0.00</span>
+        <details id="week-past-wrap">
+          <summary>Past weeks</summary>
+          <div id="week-past"></div>
+        </details>
       </section>
       <section class="panel" aria-labelledby="month-title">
         <h2 id="month-title">This month</h2>
@@ -644,6 +662,45 @@
     var sinceMonday = (local.getDay() + 6) % 7;
     local.setDate(local.getDate() - sinceMonday);
     return todayYMD(local);
+  }
+
+  function addDaysYMD(ymd, days) {
+    var p = String(ymd).split("-");
+    var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    d.setDate(d.getDate() + days);
+    return todayYMD(d);
+  }
+
+  function ymdToDate(ymd) {
+    var p = String(ymd).split("-");
+    return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  }
+
+  // Monday-Sunday weeks from the first week that has income or spending, through the week of endYMD.
+  // The first week starts at 0. Each week's end (start + income - spending) is the next week's start.
+  function weeklyLedger(list, endYMD) {
+    var first = null;
+    (list || []).forEach(function (e) {
+      if (!e || typeof e.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(e.date)) return;
+      if (e.type !== "income" && e.type !== "spending") return;
+      if (first === null || e.date < first) first = e.date;
+    });
+    var lastStart = weekStartYMD(ymdToDate(endYMD));
+    if (first === null) first = lastStart;
+    var ws = weekStartYMD(ymdToDate(first));
+    if (ws > lastStart) lastStart = ws;
+    var weeks = [];
+    var bal = 0;
+    var guard = 0;
+    while (ws <= lastStart && guard++ < 2000) {
+      var we = addDaysYMD(ws, 6);
+      var sum = summarize(list, ws, we);
+      var row = { start: ws, end: we, startBalance: bal, moneyIn: sum.moneyIn, moneyOut: sum.moneyOut, endBalance: bal + sum.moneyIn - sum.moneyOut };
+      weeks.push(row);
+      bal = row.endBalance;
+      ws = addDaysYMD(ws, 7);
+    }
+    return weeks;
   }
 
   function monthStartYMD(now) {
@@ -1855,20 +1912,53 @@
     thumbUrls = [];
   }
 
+  var weekOffset = 0; // 0 = current week, -1 = last week, ...
+
+  function shortDate(ymd) {
+    return ymdToDate(ymd).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  }
+
+  function renderWeek(today) {
+    var weeks = weeklyLedger(entries, today);
+    if (weekOffset > 0) weekOffset = 0;
+    if (weekOffset < -(weeks.length - 1)) weekOffset = -(weeks.length - 1);
+    var w = weeks[weeks.length - 1 + weekOffset];
+    document.getElementById("week-title").textContent = weekOffset === 0 ? "This week" : (weekOffset === -1 ? "Last week" : "Past week");
+    document.getElementById("week-range").textContent = shortDate(w.start) + " to " + shortDate(w.end);
+    setSigned("week-start", w.startBalance);
+    setSigned("week-end", w.endBalance);
+    document.getElementById("week-in").textContent = formatUSD(w.moneyIn);
+    document.getElementById("week-out").textContent = formatUSD(w.moneyOut);
+    document.getElementById("week-left").textContent = formatUSD(w.moneyIn - w.moneyOut);
+    document.getElementById("week-prev").disabled = weekOffset <= -(weeks.length - 1);
+    document.getElementById("week-next").disabled = weekOffset >= 0;
+    var past = document.getElementById("week-past");
+    past.textContent = "";
+    var head = el("div", "week-row head");
+    ["Week of", "Start", "Income", "Spending", "End"].forEach(function (t) { head.appendChild(el("span", "", t)); });
+    past.appendChild(head);
+    weeks.slice().reverse().slice(0, 12).forEach(function (r) {
+      var row = el("div", "week-row");
+      row.appendChild(el("span", "", ymdToDate(r.start).toLocaleDateString("en-US", { month: "short", day: "numeric" })));
+      [r.startBalance, r.moneyIn, r.moneyOut, r.endBalance].forEach(function (c, i) {
+        row.appendChild(el("span", (i === 0 || i === 3) && c < 0 ? "neg" : "", formatUSD(c)));
+      });
+      past.appendChild(row);
+    });
+  }
+
   function renderHome() {
     renderDueBanners();
     var now = new Date();
     var today = todayYMD(now);
-    var weekStart = weekStartYMD(now);
     var monthStart = monthStartYMD(now);
-    setMoney("week", summarize(entries, weekStart, today));
+    renderWeek(today);
     setMoney("month", summarize(entries, monthStart, today));
     var roll = savingsAndLeftover(entries, monthStart, today);
     setSigned("saved-month", roll.savedThisMonth);
     setSigned("saved-total", roll.totalSaved);
     setSigned("carried-in", roll.carriedIn);
     setSigned("left-rolls", roll.leftNow);
-    document.getElementById("week-range").textContent = formatEntryDate(weekStart) + " through " + formatEntryDate(today) + " (Monday through today)";
     document.getElementById("month-range").textContent = formatEntryDate(monthStart) + " through " + formatEntryDate(today);
     revokeThumbs();
     var list = document.getElementById("recent");
@@ -3726,6 +3816,8 @@
   }
 
   function bind() {
+    document.getElementById("week-prev").addEventListener("click", function () { weekOffset -= 1; renderHome(); });
+    document.getElementById("week-next").addEventListener("click", function () { weekOffset += 1; renderHome(); });
     document.getElementById("go-income").addEventListener("click", function () { location.hash = "#/income"; });
     document.getElementById("go-spend").addEventListener("click", function () { location.hash = "#/spend"; });
     document.getElementById("go-savings").addEventListener("click", function () { location.hash = "#/savings"; });
@@ -3815,6 +3907,8 @@
   window.HM = {
     summarize: summarize,
     weekStartYMD: weekStartYMD,
+    weeklyLedger: weeklyLedger,
+    setWeekOffset: function (n) { weekOffset = n; renderHome(); },
     monthStartYMD: monthStartYMD,
     todayYMD: todayYMD,
     parseCents: parseCents,
