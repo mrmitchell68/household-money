@@ -1524,8 +1524,8 @@
 
   function applyReceiptText(text) {
     var cleaned = String(text || "").replace(/\u0000/g, "").trim();
-    if (cleaned.replace(/[^A-Za-z]/g, "").length < 3) {
-      setReceiptHint("Couldn't read that photo. Fill this in yourself.");
+    if (cleaned.replace(/[^A-Za-z]/g, "").length < 3 && !extractAmount(cleaned) && !extractDate(cleaned)) {
+      setReceiptHint("Couldn't read the words on that photo. The photo is still saved. Type the amount and pick a category. Tip: lay the receipt flat in good light and fill the screen with it.");
       return;
     }
     var amountEl = document.getElementById("spend-amount");
@@ -1624,17 +1624,149 @@
     return ocrWorkerPromise;
   }
 
+  // Shrink, straighten (EXIF) and clean up a phone photo before OCR. Big 50MP photos fed raw to
+  // Tesseract run out of memory on the phone or read sideways, which is what caused "Couldn't read".
+  function decodeImage(file) {
+    if (window.createImageBitmap) {
+      return createImageBitmap(file, { imageOrientation: "from-image" }).catch(function () {
+        return decodeWithImg(file);
+      });
+    }
+    return decodeWithImg(file);
+  }
+
+  function decodeWithImg(file) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function () { resolve(img); setTimeout(function () { URL.revokeObjectURL(url); }, 0); };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("decode")); };
+      img.src = url;
+    });
+  }
+
+  function prepareOcrCanvas(source, rotate, binarize) {
+    var w = source.width || source.naturalWidth || 1;
+    var h = source.height || source.naturalHeight || 1;
+    var scale = Math.min(1, 1800 / Math.max(w, h));
+    if (Math.max(w, h) * scale < 1000) scale = Math.min(2, 1000 / Math.max(w, h));
+    var dw = Math.max(1, Math.round(w * scale));
+    var dh = Math.max(1, Math.round(h * scale));
+    var side = rotate === 90 || rotate === 270;
+    var canvas = document.createElement("canvas");
+    canvas.width = side ? dh : dw;
+    canvas.height = side ? dw : dh;
+    var ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    if (rotate) ctx.rotate(rotate * Math.PI / 180);
+    ctx.drawImage(source, -dw / 2, -dh / 2, dw, dh);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    try {
+      var data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      var px = data.data;
+      var hist = new Uint32Array(256);
+      var n = px.length / 4;
+      var gray = new Uint8ClampedArray(n);
+      for (var i = 0, k = 0; k < n; i += 4, k++) {
+        var g = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000;
+        gray[k] = g;
+        hist[gray[k]]++;
+      }
+      var lo = 0, hi = 255, acc = 0, cut = n * 0.01;
+      for (lo = 0; lo < 255; lo++) { acc += hist[lo]; if (acc > cut) break; }
+      acc = 0;
+      for (hi = 255; hi > 0; hi--) { acc += hist[hi]; if (acc > cut) break; }
+      var range = Math.max(24, hi - lo);
+      for (var m = 0, q = 0; q < n; m += 4, q++) {
+        var v = (gray[q] - lo) * 255 / range;
+        v = v < 0 ? 0 : v > 255 ? 255 : v;
+        gray[q] = v;
+      }
+      if (binarize) {
+        // Bradley adaptive threshold: handles faded thermal paper and uneven light.
+        var W = canvas.width, H = canvas.height;
+        var integ = new Float64Array((W + 1) * (H + 1));
+        for (var yy = 0; yy < H; yy++) {
+          var rowSum = 0;
+          for (var xx = 0; xx < W; xx++) {
+            rowSum += gray[yy * W + xx];
+            integ[(yy + 1) * (W + 1) + xx + 1] = integ[yy * (W + 1) + xx + 1] + rowSum;
+          }
+        }
+        var r = Math.max(8, Math.round(Math.max(W, H) / 48));
+        for (var y2 = 0; y2 < H; y2++) {
+          var ya = Math.max(0, y2 - r), yb = Math.min(H, y2 + r + 1);
+          for (var x2 = 0; x2 < W; x2++) {
+            var xa = Math.max(0, x2 - r), xb = Math.min(W, x2 + r + 1);
+            var sum = integ[yb * (W + 1) + xb] - integ[ya * (W + 1) + xb] - integ[yb * (W + 1) + xa] + integ[ya * (W + 1) + xa];
+            var mean = sum / ((yb - ya) * (xb - xa));
+            var idx = y2 * W + x2;
+            gray[idx] = gray[idx] < mean * 0.88 ? 0 : 255;
+          }
+        }
+      }
+      for (var z = 0, o = 0; o < n; z += 4, o++) {
+        px[z] = px[z + 1] = px[z + 2] = gray[o];
+        px[z + 3] = 255;
+      }
+      ctx.putImageData(data, 0, 0);
+    } catch (e) {}
+    return canvas;
+  }
+
+  function withTimeout(promise, ms) {
+    return new Promise(function (resolve, reject) {
+      var t = setTimeout(function () { reject(new Error("timeout")); }, ms);
+      promise.then(function (v) { clearTimeout(t); resolve(v); }, function (e) { clearTimeout(t); reject(e); });
+    });
+  }
+
+  function readScore(text, conf) {
+    var t = String(text || "");
+    var words = t.split(/[^A-Za-z]+/).filter(function (w) { return w.length >= 3 && /[aeiouy]/i.test(w) && !/(.)\1\1/.test(w); }).length;
+    var score = words * 10 + (conf || 0) * 3;
+    var hasTotal = /\b(total|subtotal|tax|amount|balance)\b/i.test(t);
+    if (hasTotal) score += 300;
+    if (hasTotal && extractAmount(t)) score += 300;
+    return score;
+  }
+
   function readReceipt(image, token) {
     setReceiptHint("Reading the receipt…");
-    getOcrWorker().then(function (worker) {
-      return worker.recognize(image);
-    }).then(function (result) {
+    var started = Date.now();
+    var job = Promise.all([getOcrWorker(), decodeImage(image)]).then(function (pair) {
+      var worker = pair[0], src = pair[1];
+      var best = { text: "", score: -1 };
+      var tries = [[0, false], [0, true], [90, false], [270, false], [90, true], [270, true], [180, false]];
+      function next(idx) {
+        if (idx >= tries.length || token !== photoToken) return best.text;
+        if (idx > 0 && (best.score >= 900 || Date.now() - started > 60000)) return best.text;
+        if (idx > 0) setReceiptHint("Reading the receipt… trying again.");
+        var canvas = prepareOcrCanvas(src, tries[idx][0], tries[idx][1]);
+        return worker.recognize(canvas).then(function (result) {
+          var text = result && result.data && result.data.text ? result.data.text : "";
+          var sc = readScore(text, result && result.data ? result.data.confidence : 0);
+          if (sc > best.score) best = { text: text, score: sc };
+          canvas.width = canvas.height = 1;
+          return next(idx + 1);
+        });
+      }
+      return next(0).then(function (text) {
+        if (src && src.close) src.close();
+        return text;
+      });
+    });
+    withTimeout(job, 90000).then(function (text) {
       if (token !== photoToken || !spendFormOpen()) return;
-      var text = result && result.data && result.data.text ? result.data.text : "";
       applyReceiptText(text);
-    }).catch(function () {
+    }).catch(function (err) {
       if (token !== photoToken || !spendFormOpen()) return;
-      setReceiptHint("Couldn't read that photo. Fill this in yourself.");
+      var msg = err && err.message === "timeout"
+        ? "Reading the receipt took too long. The photo is still saved. Type the amount and pick a category."
+        : "Couldn't read that photo. The photo is still saved. Type the amount and pick a category.";
+      setReceiptHint(msg);
     });
   }
 
