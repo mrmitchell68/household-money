@@ -1,4 +1,4 @@
-"""Receipt scan checks for hm-v1.10.0+ (still valid in hm-v1.11.1): date parsing, category guessing, and the scan flow.
+"""Receipt scan checks for hm-v1.10.0+ (still valid in hm-v1.11.2; real-receipt parser checks added in hm-v1.11.2): date parsing, category guessing, and the scan flow.
 Runs against http://127.0.0.1:8788/ with system Chrome. Google is never contacted."""
 import json
 import sys
@@ -286,6 +286,97 @@ def unit_tests(page):
     check("without learner dollar general unsure", learn["noModel"], None)
     check("learner ignores categories not in list", learn["ignoredDeleted"], True)
 
+# Real OCR output from Allen's two receipts (hm-v1.11.1 reads, phone photos on a marble counter).
+FOOD_LION_OCR_1111 = """, \\ p ~~
+A po :
+Nv) ); j
+* FOOD, WC) ahi
+a 59 Railroad Ave 0)
+a» os ha ner fordton, NC
+BRB -R07EN/DAIRY
+: 7 SW 7H BUTTER PECAN ICM 5.99 A #
+RE GROCERY
+WE SUNKIST DT 12C/12Z M 10.98 B *
+Be Savings
+pr You saved:
+2 TH BUTTER PECAN IC Gers)
+~ SUNKIST DT 12C/121 -5.49
+PN 0 00% Tax | 3.49 0.07
+AA 7.00% Tax 2 5.49 0.38
+- Bg TOTAL TAX 0.45
+; 2 BALANCE DUE 9.43
+VISA $9.43
+/ RRN: 039199
+KEXXXXXXXXXX 2861
+10/18/2026 21:02:33
+i INVOICE: 039199
+’ AID: A0000000980840
+4 we 0000000000"""
+
+FOOD_LION_LOGO = """iB
+s. FOOD#ALION
+8 169 Ra nar fordton, NC
+2 BALANCE DUE 9.43
+VISA $9.43
+10/18/2026 21:02:33"""
+
+DRAGON_PASSES = [
+    "Torte tees \"DRacON PLACE. FEE '\n115 RYAN DRIVE A\nFOREST CITY, NC 28043 AY\n82628757071\nq 10/18/2026 13:48:30\nMer chant IN: sssesses2803\n| lincoun t: ushsav .04\nfq TIP 1sns_ —— |\n| Total: : otf",
+    "mount: UssA7 04\nTotal:\n10/18/2026 13:48:30",
+    "imount: Uns 47 .04\nTIP: 1505. EC\nlotal: al A",
+    "BB mount: us0$47.04\nTip: lsDs. b—-\nlotal:",
+    "fdmount: usD$47 .04\nTip: 150. y—-\nlotal:",
+]
+
+
+def receipt_parser_tests(page):
+    r = page.evaluate("""(a) => {
+      const nl = String.fromCharCode(10);
+      const amt = (t) => HM.extractAmount(t);
+      const info = (t) => HM.extractAmountInfo(t);
+      const slip = 'DRAGON PLACE' + nl + '115 RYAN DRIVE' + nl + 'FOREST CITY, NC 28043' + nl + '8282875707' + nl + 'MID#266484592883' + nl +
+        '10/18/2026 13:48:30' + nl + 'Transaction #: 57' + nl + 'Amount:USD$47.04' + nl + 'TIP: USD$______.__' + nl;
+      const passes = a.dragon.map((t, i) => ({ text: t, rot: 0, score: 100 - i }));
+      const comb = HM.combineReceiptReads(passes, 0);
+      return {
+        foodLion: info(a.fl), foodLionStore: HM.extractMerchant(a.fl), foodLionDate: HM.extractDate(a.fl, new Date(2026, 9, 18, 22, 0, 0)),
+        logoStore: HM.extractMerchant(a.logo),
+        taxAfterDue: amt('BALANCE DUE 9.43' + nl + 'TOTAL TAX 0.45'),
+        savingsOnly: amt('You saved:' + nl + 'TH BUTTER PECAN IC -2.50' + nl + 'SUNKIST -5.49' + nl + 'VISA $9.43'),
+        cardOnly: info('SUNKIST DT 10.98' + nl + 'VISA $9.43'),
+        cardDisagrees: amt('TOTAL 9.48' + nl + 'BALANCE DUE 9.43' + nl + 'VISA $9.43'),
+        slipBlank: info(slip + 'Total:' + nl + 'USD$__________'),
+        slipHand: info(slip + 'Total:' + nl + 'USD$ 55.04'),
+        slipHandNoDot: info(slip + 'Total: USD$ 55 04'),
+        slipHandSilly: info(slip + 'Total:' + nl + 'USD$ 155.04'),
+        slipPrintedTip: info('Amount: $47.04' + nl + 'TIP: $8.00' + nl + 'TOTAL: $55.04'),
+        idsIgnored: amt('8282875707' + nl + 'MID#266484592883' + nl + 'TRANS ID: 466291649495250' + nl + 'AID A0000000980840' + nl + 'TOTAL 12.00'),
+        usdSpace: amt('Total amount: USD $ 18.20'),
+        dragonStore: HM.extractMerchant(slip),
+        comb: { amount: comb.amountInfo.amount, kind: comb.amountInfo.kind, tip: comb.amountInfo.tipNote, date: comb.date, tipSlip: comb.tipSlip },
+        dragonCat: HM.suggestCategory(a.dragon.join(nl) + nl + 'restaurant gratuity tip', a.cats, { learned: {} }),
+      };
+    }""", {"fl": FOOD_LION_OCR_1111, "logo": FOOD_LION_LOGO, "dragon": DRAGON_PASSES, "cats": DEFAULT + ["Eating Out"]})
+    check("receipt food lion amount (BALANCE DUE, confirmed by VISA)", [r["foodLion"]["amount"], r["foodLion"]["kind"], r["foodLion"]["confirmed"]], ["9.43", "due", True])
+    # The old read never shows "Food Lion" clearly; the store must at least not be marble noise ("A po :").
+    check("receipt food lion store is not marble noise", r["foodLionStore"].upper().startswith("FOOD"), True)
+    check("receipt food lion date", r["foodLionDate"], "2026-10-18")
+    check("receipt garbled logo FOOD#ALION is Food Lion", r["logoStore"], "Food Lion")
+    check("receipt TOTAL TAX is not the total", r["taxAfterDue"], "9.43")
+    check("receipt savings negatives ignored", r["savingsOnly"], "9.43")
+    check("receipt card charge used when no total", [r["cardOnly"]["amount"], r["cardOnly"]["kind"]], ["9.43", "tender"])
+    check("receipt card amount settles a misread total", r["cardDisagrees"], "9.43")
+    check("receipt slip with blank handwritten total -> Amount + tip note", [r["slipBlank"]["amount"], r["slipBlank"]["tipNote"]], ["47.04", True])
+    check("receipt slip with readable total incl tip", [r["slipHand"]["amount"], r["slipHand"]["tipNote"]], ["55.04", True])
+    check("receipt slip total without decimal point", r["slipHandNoDot"]["amount"], "55.04")
+    check("receipt slip silly total ignored", [r["slipHandSilly"]["amount"], r["slipHandSilly"]["tipNote"]], ["47.04", True])
+    check("receipt printed tip and total", [r["slipPrintedTip"]["amount"], r["slipPrintedTip"]["tipNote"]], ["55.04", False])
+    check("receipt long IDs and phone numbers ignored", r["idsIgnored"], "12.00")
+    check("receipt USD $ spacing", r["usdSpace"], "18.20")
+    check("receipt store above address", r["dragonStore"], "DRAGON PLACE")
+    check("receipt dragon passes vote 47.04 over misread 7.04", r["comb"], {"amount": "47.04", "kind": "slip", "tip": True, "date": "2026-10-18", "tipSlip": True})
+    check("receipt tip slip -> Eating Out", r["dragonCat"] and r["dragonCat"]["category"], "Eating Out")
+
 
 def e2e(browser):
     ctx = browser.new_context(viewport={"width": 412, "height": 915})
@@ -395,6 +486,7 @@ def main():
         page.goto(URL, wait_until="domcontentloaded")
         page.wait_for_function("() => window.HM && HM.extractDate")
         unit_tests(page)
+        receipt_parser_tests(page)
         ctx.close()
         e2e(browser)
         browser.close()

@@ -1363,34 +1363,145 @@
     } catch (e) {}
   }
 
+  // OCR clean-up for money: "USD$ 47.04", "USDS47.04", "US$", "47 .04" and "$ 9.43" all become "$47.04".
+  function normalizeMoneyText(line) {
+    var s = String(line || "").replace(/,(?=\d{3}\b)/g, "");
+    s = s.replace(/\bU\s?S\s?[D0O]?\s?[\$S5]\s?(?=\d)/gi, "$");
+    s = s.replace(/\bUSD\s?(?=\d)/gi, "$");
+    s = s.replace(/\$\s+(?=\d)/g, "$");
+    s = s.replace(/(\d)\s?[.,]\s?(\d{2})(?![\d.])/g, "$1.$2");
+    return s;
+  }
+
+  // Money on a line, skipping negatives (savings, coupons), percents and pieces of long ID numbers.
+  function moneyValuesOnLine(line, labeled) {
+    var strict = moneyValuesIn(normalizeMoneyText(line), false);
+    if (strict.length) return strict;
+    // "$47 04": the decimal point is often lost on dot-matrix print. Only tried after a $ sign,
+    // or at the end of a TOTAL / AMOUNT line, and such reads count for less when passes disagree.
+    var s = normalizeMoneyText(line).replace(/\$(\d{1,4}) (\d{2})(?![\d.])/g, "$$$1.$2");
+    if (labeled) s = s.replace(/(^|[^\d.])(\d{1,4}) (\d{2})\s*$/, "$1$2.$3");
+    return moneyValuesIn(s, true);
+  }
+
+  function moneyValuesIn(s, loose) {
+    var out = [];
+    var re = /(-\s?)?(\$)?(\d{1,6})\.(\d{2})(?![\d%]|\.\d)(\s?-)?/g;
+    var m;
+    while ((m = re.exec(s))) {
+      var before = s.charAt(m.index - 1);
+      if (/[\d.\/:]/.test(before) || m[1] || m[5]) {
+        // Not money here; look again one character later (for "0$47.04" style misreads).
+        re.lastIndex = m.index + 1;
+        continue;
+      }
+      if (m[3].length > 1 && m[3].charAt(0) === "0" && !m[2]) continue;
+      var n = Number(m[3] + "." + m[4]);
+      if (!isFinite(n) || n <= 0 || n > 999999.99) continue;
+      out.push({ value: n.toFixed(2), dollar: !!m[2], loose: !!loose });
+    }
+    return out;
+  }
+
   function moneyOnLine(line) {
-    var s = String(line || "").replace(/,/g, "");
-    var matches = s.match(/\$?\d+\.\d{2}/g);
-    if (!matches) return "";
-    var raw = matches[matches.length - 1].replace(/\$/g, "");
-    var n = Number(raw);
-    if (!isFinite(n) || n <= 0 || n > 9999999.99) return "";
-    return n.toFixed(2);
+    var vals = moneyValuesOnLine(line);
+    return vals.length ? vals[vals.length - 1].value : "";
+  }
+
+  var TOTAL_WORD = "[T1l|I\\[]\\s?o\\s?t\\s?a\\s?[l1I|i]";
+  var RE_TOTAL = new RegExp("(^|[^A-Za-z])" + TOTAL_WORD + "(?![a-z])", "i");
+  var RE_SUBTOTAL = new RegExp("SUB[\\s\\-]*" + TOTAL_WORD, "i");
+
+  function amountLineKind(raw) {
+    var u = String(raw || "").toUpperCase();
+    if (RE_SUBTOTAL.test(u)) return "sub";
+    if (/\b(YOU\s+SAVED|SAVINGS|SAVED|DISCOUNTS?|COUPONS?|CHANGE(\s+DUE)?|CASH\s+BACK|ITEMS?\s+SOLD|POINTS|REWARDS?)\b/.test(u)) return "skip";
+    if (/\b(TOTAL\s+)?TAX(ES)?\b|\bTAX\s+TOTAL\b|\d%/.test(u) && !/\b(BALANCE|AMOUNT)\s+DUE\b/.test(u)) return "tax";
+    if (/\b(BALANCE|AMOUNT|AMT|TOTAL)\s+DUE\b|\bGRAND\s+TOTAL\b|\bBAL(ANCE)?\s+DUE\b/.test(u)) return "due";
+    if (RE_TOTAL.test(u)) return "total";
+    if (/(^|[^A-Z])(T|\[|I|1|L|\|)?[I1L|!]P\s*[:;.]|\bTIP\b|\bGRATUITY\b/.test(u)) return "tip";
+    if (/\b(VISA|MASTER\s?CARD|MC|AMEX|AMERICAN\s+EXPRESS|DISCOVER|DEBIT|CREDIT|CARD|TEND(ERED)?|CHARGED?|PAID|PAYMENT|EBT)\b/.test(u)) return "tender";
+    if (/(^|[^A-Z])[A-Z]{0,2}[MN]OUN\s?T\b|\bSALE\s+AMOUNT\b|\bPURCHASE\b|\bAMT\b/.test(u)) return "slip";
+    return "";
+  }
+
+  // Works out the amount paid and how sure we are. kind: due, total, tender, slip (card slip "Amount:"), fallback.
+  function extractAmountInfo(text) {
+    var lines = String(text || "").split(/\r?\n/);
+    var found = { due: [], total: [], tender: [], slip: [], tip: [], fallback: [] };
+    var tipLine = false, tipHasMoney = false, totalLineNoMoney = false, looseVals = {};
+    for (var i = 0; i < lines.length; i++) {
+      var raw = lines[i];
+      var kind = amountLineKind(raw);
+      var labeledLine = kind === "total" || kind === "due" || kind === "slip";
+      var vals = moneyValuesOnLine(raw, labeledLine);
+      if (kind === "tip") {
+        tipLine = true;
+        if (vals.length) tipHasMoney = true;
+        continue;
+      }
+      if (!vals.length && (kind === "total" || kind === "due" || kind === "slip")) {
+        // "Total:" with the number printed (or written) on the next line.
+        var nx = lines[i + 1];
+        if (nx != null && !amountLineKind(nx)) vals = moneyValuesOnLine(nx, true);
+        if (!vals.length && kind === "total") totalLineNoMoney = true;
+      }
+      if (!vals.length) continue;
+      var v = vals[vals.length - 1].value;
+      if (vals[vals.length - 1].loose) { if (!(v in looseVals)) looseVals[v] = true; } else looseVals[v] = false;
+      if (kind === "due" || kind === "total" || kind === "tender" || kind === "slip") found[kind].push(v);
+      else if (!kind) found.fallback.push(v);
+    }
+    var info = { amount: "", kind: "", confirmed: false, tipNote: false, tipLine: tipLine || totalLineNoMoney, tipHasMoney: tipHasMoney, slip: "", total: "" };
+    var tenders = found.tender;
+    function has(list, v) { return list.indexOf(v) !== -1; }
+    var total = found.due.length ? found.due[found.due.length - 1] : found.total.length ? found.total[found.total.length - 1] : "";
+    var slip = found.slip.length ? found.slip[0] : "";
+    info.slip = slip;
+    info.total = total;
+    info.looseVals = looseVals;
+    if (slip && (tipLine || totalLineNoMoney)) {
+      // Restaurant card slip: printed "Amount", a TIP line and a Total that is often written in by hand.
+      var t = Number(total), a = Number(slip);
+      if (total && t >= a && t <= a * 1.6 + 1) {
+        info.amount = total; info.kind = "total"; info.confirmed = t === a || has(tenders, total);
+        info.tipNote = !tipHasMoney && t !== a;
+      } else {
+        info.amount = slip; info.kind = "slip"; info.tipNote = !tipHasMoney;
+      }
+      return info;
+    }
+    if (total) {
+      info.amount = total; info.kind = found.due.length ? "due" : "total";
+      info.confirmed = has(tenders, total) || has(found.slip, total) || (found.due.length && has(found.total, total));
+      if (!info.confirmed && tenders.length) {
+        // Card line disagrees: trust a value the receipt prints twice.
+        var counts = {};
+        found.due.concat(found.total, tenders).forEach(function (x) { counts[x] = (counts[x] || 0) + 1; });
+        var bestV = total;
+        Object.keys(counts).forEach(function (x) { if (counts[x] > counts[bestV]) bestV = x; });
+        if (bestV !== total) { info.amount = bestV; info.confirmed = true; }
+      }
+      return info;
+    }
+    if (tenders.length) {
+      info.amount = tenders[tenders.length - 1]; info.kind = "tender";
+      info.confirmed = tenders.length > 1 && tenders.indexOf(info.amount) !== tenders.lastIndexOf(info.amount);
+      return info;
+    }
+    if (slip) { info.amount = slip; info.kind = "slip"; return info; }
+    if (found.fallback.length) { info.amount = found.fallback[found.fallback.length - 1]; info.kind = "fallback"; }
+    return info;
   }
 
   function extractAmount(text) {
-    var lines = String(text || "").split(/\r?\n/);
-    var labeled = "";
-    var fallback = "";
-    for (var i = 0; i < lines.length; i++) {
-      var raw = lines[i];
-      var upper = raw.toUpperCase();
-      var money = moneyOnLine(raw);
-      if (!money) continue;
-      var sub = /\bSUB[\s-]*TOTAL\b/.test(upper);
-      var taxOnly = /\bTAX\b/.test(upper) && !/\bTOTAL\b/.test(upper);
-      var total = /\bTOTAL\b/.test(upper) && !sub;
-      var due = /AMOUNT\s+DUE/.test(upper);
-      var balance = /\bBALANCE\b/.test(upper);
-      if (total || due || balance) labeled = money;
-      else if (!sub && !taxOnly) fallback = money;
-    }
-    return labeled || fallback || "";
+    return extractAmountInfo(text).amount || "";
+  }
+
+  var AMOUNT_RANK = { due: 5, total: 4, tender: 3, slip: 3, fallback: 1 };
+  function amountInfoRank(info) {
+    if (!info || !info.amount) return 0;
+    return (AMOUNT_RANK[info.kind] || 0) * 2 + (info.confirmed ? 1 : 0);
   }
 
   function validYMD(y, m, d) {
@@ -1429,7 +1540,8 @@
     var today = now || new Date();
     var maxDay = todayYMD(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1));
     var minDay = todayYMD(new Date(today.getFullYear() - 1, today.getMonth(), today.getDate() - 1));
-    var fixed = String(text || "").replace(/(^|[^A-Za-z0-9])([0-9Oo]{1,4}[\/\-.][0-9Oo]{1,2}[\/\-.][0-9Oo]{2,4})(?![A-Za-z0-9])/g, function (m, pre, d) {
+    var fixed = String(text || "").replace(/(^|[^\d])(\d{1,2})[(|lI\\](\d{1,2})\/(\d{4})(?!\d)/g, "$1$2/$3/$4");
+    fixed = fixed.replace(/(^|[^A-Za-z0-9])([0-9Oo]{1,4}[\/\-.][0-9Oo]{1,2}[\/\-.][0-9Oo]{2,4})(?![A-Za-z0-9])/g, function (m, pre, d) {
       return /\d/.test(d) ? pre + d.replace(/[Oo]/g, "0") : m;
     });
     var lines = fixed.split(/\r?\n/);
@@ -1483,20 +1595,179 @@
     return best ? best.date : "";
   }
 
-  function extractMerchant(text) {
-    var lines = String(text || "").split(/\r?\n/);
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i].replace(/\s+/g, " ").trim();
-      if (line.length < 3 || line.length > 48) continue;
-      var letters = line.replace(/[^A-Za-z]/g, "");
-      if (letters.length < 3) continue;
-      if (/https?:|www\./i.test(line)) continue;
-      if (/\d{3}[-.\s]\d{3}[-.\s]\d{4}/.test(line)) continue;
-      if (/^(receipt|thank you|thanks|welcome|customer copy|store copy|sale|cashier|tel|phone|date|time|invoice|order|transaction|visa|mastercard|debit|credit|auth|approved|item|qty|cash|member|rewards|survey)\b/i.test(line)) continue;
-      if (/\b(sub[\s-]*total|total|tax|amount due|balance)\b/i.test(line)) continue;
-      return line;
+  // Well-known stores, so a garbled logo line still gives a clean store name.
+  var KNOWN_STORES = ["Food Lion", "Walmart", "Kroger", "Aldi", "Publix", "Ingles", "Harris Teeter", "Lowes Foods", "Lidl",
+    "Dollar General", "Family Dollar", "Dollar Tree", "The Home Depot", "Home Depot", "Lowe's", "Target", "CVS", "Walgreens", "Rite Aid",
+    "Sheetz", "Speedway", "Shell", "Exxon", "Circle K", "QuikTrip", "Wawa", "Murphy USA", "Sam's Club", "Costco",
+    "Tractor Supply", "Harbor Freight", "Ace Hardware", "Advance Auto Parts", "AutoZone", "O'Reilly Auto Parts", "Big Lots",
+    "Hobby Lobby", "Belk", "Kohl's", "Ross", "TJ Maxx", "Marshalls", "Ollie's", "Bi-Lo", "Food City", "Save A Lot",
+    "McDonald's", "Chick-fil-A", "Bojangles", "Wendy's", "Burger King", "Taco Bell", "Subway", "Starbucks", "Dunkin",
+    "Cook Out", "Zaxby's", "Waffle House", "Cracker Barrel", "Pizza Hut", "Domino's", "Papa John's", "Hardee's", "Arby's",
+    "Sonic", "Golden Corral", "Texas Roadhouse", "Olive Garden", "Applebee's", "Chili's", "Ingles Markets"];
+
+  function knownStoreIn(text) {
+    var hay = " " + normalizeLearnedKey(text) + " ";
+    var best = "";
+    KNOWN_STORES.forEach(function (name) {
+      var key = normalizeLearnedKey(name);
+      if (key.length < 3) return;
+      if (hay.indexOf(" " + key + " ") !== -1 && key.length > normalizeLearnedKey(best).length) best = name;
+    });
+    if (best) return best;
+    // Logo lines come out like "FOOD#ALION": letters only, allow a stray letter between the words.
+    var squashed = String(text || "").toUpperCase().split(/\r?\n/).map(function (l) { return l.replace(/[^A-Z]/g, ""); });
+    KNOWN_STORES.forEach(function (name) {
+      var words = normalizeLearnedKey(name).toUpperCase().split(" ").filter(function (x) { return x.length > 1; });
+      if (words.length < 2 || words.join("").length < 7 || best) return;
+      var re = new RegExp(words.join("[A-Z]{0,2}"));
+      for (var i = 0; i < squashed.length; i++) { if (re.test(squashed[i])) { best = name; break; } }
+    });
+    return best;
+  }
+
+  function wordLike(tok) {
+    var letters = tok.replace(/[^A-Za-z]/g, "");
+    return letters.length >= 3 && /[aeiouy]/i.test(letters) && letters.length / tok.length >= 0.7 && !/(.)\1\1/i.test(letters);
+  }
+
+  function trimNoiseTokens(line) {
+    var toks = line.split(" ").filter(function (t) { return !!t; });
+    function noise(t) {
+      if (/^#?\d{2,}$/.test(t)) return false;
+      if (!/[A-Za-z0-9]/.test(t)) return true;
+      if (t.length <= 2) return true;
+      return !wordLike(t) && !/\d/.test(t) && t.length <= 3;
     }
-    return "";
+    while (toks.length && noise(toks[0])) toks.shift();
+    while (toks.length && noise(toks[toks.length - 1])) toks.pop();
+    // Receipts print store names in capitals; lowercase words at the ends of a capitals line are crease noise.
+    function upperish(t) { var l = t.replace(/[^A-Za-z]/g, ""); return l.length >= 2 && l.replace(/[^A-Z]/g, "").length / l.length >= 0.6; }
+    if (toks.filter(upperish).length >= 2) {
+      while (toks.length && !upperish(toks[0]) && !/\d/.test(toks[0])) toks.shift();
+      while (toks.length && !upperish(toks[toks.length - 1]) && !/\d/.test(toks[toks.length - 1])) toks.pop();
+    }
+    return toks.map(function (t) { return t.replace(/^["'`‘’“”(\[{|]+|["'`‘’“”)\]}|.,:;]+$/g, ""); })
+      .filter(function (t) { return !!t; }).join(" ");
+  }
+
+  function merchantQuality(line) {
+    var toks = String(line || "").split(" ").filter(function (t) { return !!t; });
+    if (!toks.length) return -1;
+    var good = toks.filter(wordLike).length;
+    return good / toks.length + good * 0.05;
+  }
+
+  function merchantLineOk(line) {
+    if (line.length < 3 || line.length > 48) return false;
+    var letters = line.replace(/[^A-Za-z]/g, "");
+    if (letters.length < 3) return false;
+    if (/https?:|www\./i.test(line)) return false;
+    if (/\d{3}[-.\s)]+\d{3}[-.\s]\d{4}/.test(line)) return false;
+    if (/^(receipt|thank you|thanks|welcome|customer copy|store copy|sale|cashier|tel|phone|date|time|invoice|order|transaction|visa|mastercard|debit|credit|auth|approved|item|qty|cash|member|rewards|survey|merchant|terminal|device)\b/i.test(line)) return false;
+    if (/\b(sub[\s-]*total|total|tax|amount due|balance)\b/i.test(line)) return false;
+    // City, state and ZIP lines, and street address lines.
+    if (/,\s*[A-Za-z]{2}\.?(\s+\d{5}(-\d{4})?)?\s*$/.test(line) || /\b[A-Z]{2}\s+\d{5}(-\d{4})?\b/.test(line)) return false;
+    if (RE_ADDRESS.test(line)) return false;
+    var toks = line.split(" ");
+    if (toks.filter(wordLike).length / toks.length < 0.5) return false;
+    return true;
+  }
+
+  var RE_ADDRESS = /^\W*\d{1,6}\s+[A-Za-z].*\b(st|street|ave|avenue|rd|road|dr|drive|hwy|highway|blvd|ln|lane|way|pkwy|parkway|ct|pl|pike|cir|circle|plaza)\b/i;
+
+  function extractMerchant(text) {
+    return extractMerchantDetail(text).name;
+  }
+
+  function extractMerchantDetail(text) {
+    var lines = String(text || "").split(/\r?\n/).map(function (l) { return l.replace(/\s+/g, " ").trim(); });
+    var known = knownStoreIn(lines.slice(0, 14).join("\n"));
+    var addr = -1;
+    for (var a = 0; a < Math.min(lines.length, 14); a++) { if (RE_ADDRESS.test(lines[a])) { addr = a; break; } }
+    var first = "";
+    var aboveAddr = "";
+    for (var i = 0; i < lines.length; i++) {
+      var line = trimNoiseTokens(lines[i]);
+      if (!merchantLineOk(line)) continue;
+      if (!first) first = line;
+      if (addr > 0 && i < addr && i >= addr - 3) aboveAddr = line;
+      if (addr < 0 || i >= addr) break;
+    }
+    if (known) {
+      var nk = normalizeLearnedKey(known);
+      if (first && hasPhrase(normalizeLearnedKey(first), nk)) return { name: first, known: true, anchored: false };
+      if (aboveAddr && hasPhrase(normalizeLearnedKey(aboveAddr), nk)) return { name: aboveAddr, known: true, anchored: true };
+      return { name: known, known: true, anchored: false };
+    }
+    if (aboveAddr && aboveAddr !== first && merchantQuality(first) < 0.75 && merchantQuality(aboveAddr) > merchantQuality(first)) return { name: aboveAddr, known: false, anchored: true };
+    return { name: first, known: false, anchored: !!first && first === aboveAddr };
+  }
+
+  // Several OCR passes of the same photo: take the surest amount, the cleanest store name and
+  // the date most passes agree on. Passes are ordered best-read first.
+  function combineReceiptReads(reads, rot) {
+    var list = (reads || []).filter(function (r) { return r && r.rot === rot; }).slice();
+    list.sort(function (a, b) { return b.score - a.score; });
+    var texts = list.map(function (r) { return String(r.text || ""); });
+    var infos = texts.map(extractAmountInfo);
+    // Vote: each pass backs its amount by how sure it is (rank squared), so one confirmed
+    // "BALANCE DUE" beats a stray number, and three passes reading 47.04 beat one reading 57.04.
+    var votes = {}, firstInfo = {};
+    infos.forEach(function (inf) {
+      var r = amountInfoRank(inf);
+      if (!r) return;
+      votes[inf.amount] = (votes[inf.amount] || 0) + r * r * (inf.looseVals && inf.looseVals[inf.amount] ? 0.5 : 1);
+      if (!firstInfo[inf.amount] || amountInfoRank(firstInfo[inf.amount]) < r) firstInfo[inf.amount] = inf;
+    });
+    var best = { amount: "", kind: "", confirmed: false, tipNote: false };
+    var bestVotes = 0;
+    Object.keys(votes).forEach(function (v) { if (votes[v] > bestVotes) { bestVotes = votes[v]; best = firstInfo[v]; } });
+    var anyTip = infos.some(function (inf) { return inf.tipLine; });
+    var slipVotes = {}, slip = "", sv = 0;
+    infos.forEach(function (inf) { if (inf.slip) slipVotes[inf.slip] = (slipVotes[inf.slip] || 0) + (inf.looseVals && inf.looseVals[inf.slip] ? 1 : 2); });
+    Object.keys(slipVotes).forEach(function (v) { if (slipVotes[v] > sv) { sv = slipVotes[v]; slip = v; } });
+    if (slip && anyTip) {
+      // Card slip with a TIP line: the total is often handwritten. Only trust a total that makes sense.
+      var a = Number(slip), pick = "";
+      infos.forEach(function (inf) {
+        var t = Number(inf.total);
+        if (!pick && inf.total && t >= a && t <= a * 1.6 + 1) pick = inf.total;
+      });
+      var tipPrinted = infos.some(function (inf) { return inf.tipHasMoney; });
+      if (pick) best = { amount: pick, kind: "total", confirmed: Number(pick) === a, tipNote: !tipPrinted && Number(pick) !== a };
+      else best = { amount: slip, kind: "slip", confirmed: false, tipNote: !tipPrinted };
+    }
+    var merchant = "", mq = -1;
+    list.forEach(function (r) {
+      var t = String(r.text || "");
+      var det = extractMerchantDetail(t);
+      var m = det.name;
+      if (m && r.sure && !det.known) {
+        // Same line without the doubtful words at its ends, when OCR was unsure about them.
+        var key = normalizeLearnedKey(m), better = "";
+        r.sure.split(/\r?\n/).forEach(function (ln) {
+          var c = trimNoiseTokens(ln.replace(/\s+/g, " ").trim());
+          var ck = normalizeLearnedKey(c);
+          if (ck && ck !== key && hasPhrase(key, ck) && merchantLineOk(c) && c.length > better.length &&
+              (c.split(" ").filter(wordLike).length >= 2 || m.split(" ").filter(wordLike).length <= 1)) better = c;
+        });
+        if (better) m = better;
+      }
+      if (!m) return;
+      var good = m.split(" ").filter(wordLike);
+      // A lone short word ("RIVE", "PLE") is a scrap of a misread line, not a store name.
+      if (!det.known && good.length < 2 && !(good.length === 1 && good[0].replace(/[^A-Za-z]/g, "").length >= 5)) return;
+      var q = merchantQuality(m) + (det.known ? 2 : 0) + (det.anchored ? 0.5 : 0);
+      if (q > mq) { mq = q; merchant = m; }
+    });
+    var dates = {}, date = "", dn = 0;
+    texts.forEach(function (t) {
+      var d = extractDate(t);
+      if (!d) return;
+      dates[d] = (dates[d] || 0) + 1;
+      if (dates[d] > dn) { dn = dates[d]; date = d; }
+    });
+    return { text: texts[0] || "", texts: texts, amountInfo: best, merchant: merchant, date: date, tipSlip: !!(slip && anyTip) };
   }
 
   function setReceiptHint(msg) {
@@ -1522,26 +1793,35 @@
     return false;
   }
 
-  function applyReceiptText(text) {
-    var cleaned = String(text || "").replace(/\u0000/g, "").trim();
-    if (cleaned.replace(/[^A-Za-z]/g, "").length < 3 && !extractAmount(cleaned) && !extractDate(cleaned)) {
+  function applyReceiptText(input) {
+    var combined = input && typeof input === "object" ? input : combineReceiptReads([{ text: String(input || ""), rot: 0, score: 0 }], 0);
+    var cleaned = String(combined.text || "").replace(/\u0000/g, "").trim();
+    var allText = (combined.texts || [cleaned]).join("\n").replace(/\u0000/g, "");
+    var info = combined.amountInfo || extractAmountInfo(cleaned);
+    if (cleaned.replace(/[^A-Za-z]/g, "").length < 3 && !info.amount && !combined.date) {
       setReceiptHint("Couldn't read the words on that photo. The photo is still saved. Type the amount and pick a category. Tip: lay the receipt flat in good light and fill the screen with it.");
       return;
     }
     var amountEl = document.getElementById("spend-amount");
     var noteEl = document.getElementById("spend-note");
     var dateEl = document.getElementById("spend-date");
+    var amountMsg = "";
     if (!String(amountEl.value || "").trim()) {
-      var amt = extractAmount(cleaned);
-      if (amt) amountEl.value = amt;
+      if (info.amount) {
+        amountEl.value = info.amount;
+        if (info.tipNote && info.kind === "slip") amountMsg = "Check the total: a tip may have been written in by hand. The printed amount ($" + info.amount + ") was filled in.";
+        else if (info.tipNote) amountMsg = "Check the total: it includes a handwritten tip.";
+      } else {
+        amountMsg = "Couldn't find the total. Type the amount.";
+      }
     }
-    var merchant = extractMerchant(cleaned);
+    var merchant = combined.merchant || "";
     if (merchant && spendPhoto) spendPhoto.merchant = merchant;
     if (!String(noteEl.value || "").trim() && merchant) noteEl.value = merchant.slice(0, 200);
     var today = todayYMD();
     var dateMsg = "";
     if (!dateEl.value || dateEl.value === today) {
-      var found = extractDate(cleaned);
+      var found = combined.date || "";
       if (found) {
         dateEl.value = found;
         dateMsg = "Date from the receipt: " + formatEntryDate(found) + ".";
@@ -1553,7 +1833,8 @@
     var picked = document.querySelector('#cat-chips input[name="category"]:checked');
     var suggestion = null;
     try {
-      suggestion = suggestCategory(cleaned, categories, {
+      // A card slip with a TIP line is almost always a restaurant.
+      suggestion = suggestCategory((merchant ? merchant + "\n" : "") + allText + (combined.tipSlip ? "\nrestaurant gratuity tip" : ""), categories, {
         learned: loadLearned(),
         model: currentLearner(),
         amountCents: parseCents(amountEl.value)
@@ -1563,7 +1844,7 @@
     }
     var guess = suggestion && suggestion.category ? suggestion.category : "";
     if (spendPhoto) {
-      spendPhoto.scanTokens = learnTokens(cleaned, 60);
+      spendPhoto.scanTokens = learnTokens((merchant ? merchant + "\n" : "") + cleaned, 60);
       spendPhoto.guess = guess;
     }
     var catMsg = "";
@@ -1575,7 +1856,7 @@
         ? "This looks like " + suggestion.label + ", but that isn't one of your categories. Which category is this?"
         : "Which category is this?";
     }
-    setReceiptHint([dateMsg, catMsg].filter(function (x) { return !!x; }).join(" "));
+    setReceiptHint([amountMsg, dateMsg, catMsg].filter(function (x) { return !!x; }).join(" "));
   }
 
   function assetUrl(path) {
@@ -1645,12 +1926,105 @@
     });
   }
 
-  function prepareOcrCanvas(source, rotate, binarize) {
+  // Find the receipt paper on a darker counter or table and cut it out, so marble veins and
+  // shadows are not read as words and the receipt gets all of Tesseract's pixels.
+  function findReceiptPaper(src) {
+    var w = src.width || src.naturalWidth || 0;
+    var h = src.height || src.naturalHeight || 0;
+    if (w < 60 || h < 60) return src;
+    var s = Math.min(1, 360 / Math.max(w, h));
+    var cw = Math.max(1, Math.round(w * s)), ch = Math.max(1, Math.round(h * s));
+    var c = document.createElement("canvas");
+    c.width = cw; c.height = ch;
+    var x = c.getContext("2d", { willReadFrequently: true });
+    x.drawImage(src, 0, 0, cw, ch);
+    var px = x.getImageData(0, 0, cw, ch).data, n = cw * ch;
+    var g = new Uint8Array(n), sat = new Uint8Array(n), hist = new Uint32Array(256);
+    for (var i = 0, k = 0; k < n; i += 4, k++) {
+      var r = px[i], gg = px[i + 1], b = px[i + 2];
+      g[k] = (r * 299 + gg * 587 + b * 114) / 1000;
+      hist[g[k]]++;
+      sat[k] = Math.max(r, gg, b) - Math.min(r, gg, b);
+    }
+    var sum = 0, t;
+    for (t = 0; t < 256; t++) sum += t * hist[t];
+    var sumB = 0, wB = 0, bestVar = 0, thr = 128;
+    for (t = 0; t < 256; t++) {
+      wB += hist[t];
+      if (!wB) continue;
+      var wF = n - wB;
+      if (!wF) break;
+      sumB += t * hist[t];
+      var mB = sumB / wB, mF = (sum - sumB) / wF, v = wB * wF * (mB - mF) * (mB - mF);
+      if (v > bestVar) { bestVar = v; thr = t; }
+    }
+    var m = new Uint8Array(n);
+    for (k = 0; k < n; k++) m[k] = g[k] > thr && sat[k] < 60 ? 1 : 0;
+    function morph(a, rad, dil) {
+      // Separable square dilate/erode.
+      var tmp = new Uint8Array(n), out = new Uint8Array(n), xx, yy, d, val;
+      for (yy = 0; yy < ch; yy++) for (xx = 0; xx < cw; xx++) {
+        val = dil ? 0 : 1;
+        for (d = -rad; d <= rad; d++) {
+          var x2 = xx + d, p = x2 < 0 || x2 >= cw ? (dil ? 0 : 0) : a[yy * cw + x2];
+          if (dil ? p : !p) { val = dil ? 1 : 0; break; }
+        }
+        tmp[yy * cw + xx] = val;
+      }
+      for (yy = 0; yy < ch; yy++) for (xx = 0; xx < cw; xx++) {
+        val = dil ? 0 : 1;
+        for (d = -rad; d <= rad; d++) {
+          var y2 = yy + d, q = y2 < 0 || y2 >= ch ? 0 : tmp[y2 * cw + xx];
+          if (dil ? q : !q) { val = dil ? 1 : 0; break; }
+        }
+        out[yy * cw + xx] = val;
+      }
+      return out;
+    }
+    // Fill the text holes, then cut thin marble veins that touch the paper.
+    m = morph(m, 2, true);
+    m = morph(m, 5, false);
+    m = morph(m, 3, true);
+    var seen = new Uint8Array(n), bestN = 0, bb = null, stack = [];
+    for (k = 0; k < n; k++) {
+      if (!m[k] || seen[k]) continue;
+      var cnt = 0, x0 = cw, y0 = ch, x1 = 0, y1 = 0;
+      seen[k] = 1; stack.push(k);
+      while (stack.length) {
+        var qi = stack.pop(), qx = qi % cw, qy = (qi - qx) / cw;
+        cnt++;
+        if (qx < x0) x0 = qx; if (qx > x1) x1 = qx; if (qy < y0) y0 = qy; if (qy > y1) y1 = qy;
+        if (qx > 0 && m[qi - 1] && !seen[qi - 1]) { seen[qi - 1] = 1; stack.push(qi - 1); }
+        if (qx < cw - 1 && m[qi + 1] && !seen[qi + 1]) { seen[qi + 1] = 1; stack.push(qi + 1); }
+        if (qy > 0 && m[qi - cw] && !seen[qi - cw]) { seen[qi - cw] = 1; stack.push(qi - cw); }
+        if (qy < ch - 1 && m[qi + cw] && !seen[qi + cw]) { seen[qi + cw] = 1; stack.push(qi + cw); }
+      }
+      if (cnt > bestN) { bestN = cnt; bb = [x0, y0, x1, y1]; }
+    }
+    if (!bb || bestN < n * 0.08) return src;
+    var pad = 4;
+    var X0 = Math.max(0, bb[0] - pad) / s, Y0 = Math.max(0, bb[1] - pad) / s;
+    var X1 = Math.min(cw, bb[2] + 1 + pad) / s, Y1 = Math.min(ch, bb[3] + 1 + pad) / s;
+    if ((X1 - X0) * (Y1 - Y0) > w * h * 0.92) return src;
+    var ow = Math.round(X1 - X0), oh = Math.round(Y1 - Y0);
+    var sc = Math.min(1, 2600 / Math.max(ow, oh));
+    var out = document.createElement("canvas");
+    out.width = Math.max(1, Math.round(ow * sc));
+    out.height = Math.max(1, Math.round(oh * sc));
+    out.getContext("2d").drawImage(src, X0, Y0, ow, oh, 0, 0, out.width, out.height);
+    return out;
+  }
+
+  function prepareOcrCanvas(source, rotate, binarize, squeezeX, blurPx, targetWidth) {
     var w = source.width || source.naturalWidth || 1;
     var h = source.height || source.naturalHeight || 1;
-    var scale = Math.min(1, 1800 / Math.max(w, h));
-    if (Math.max(w, h) * scale < 1000) scale = Math.min(2, 1000 / Math.max(w, h));
-    var dw = Math.max(1, Math.round(w * scale));
+    // About 2.6 megapixels: enough for small receipt print, small enough for phone memory.
+    var cap = Math.min(2400 / Math.max(w, h), Math.sqrt(2600000 / (w * h)));
+    var scale = Math.min(1, cap);
+    if (targetWidth) scale = Math.min(cap, targetWidth / w);
+    else if (Math.max(w, h) * scale < 1000) scale = Math.min(2, 1000 / Math.max(w, h));
+    var sx = squeezeX && squeezeX > 0 && squeezeX < 1 ? squeezeX : 1;
+    var dw = Math.max(1, Math.round(w * scale * sx));
     var dh = Math.max(1, Math.round(h * scale));
     var side = rotate === 90 || rotate === 270;
     var canvas = document.createElement("canvas");
@@ -1661,7 +2035,10 @@
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.translate(canvas.width / 2, canvas.height / 2);
     if (rotate) ctx.rotate(rotate * Math.PI / 180);
+    // A little blur joins the dots of dot-matrix print into solid strokes.
+    if (blurPx && "filter" in ctx) ctx.filter = "blur(" + blurPx + "px)";
     ctx.drawImage(source, -dw / 2, -dh / 2, dw, dh);
+    if (blurPx && "filter" in ctx) ctx.filter = "none";
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     try {
       var data = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -1733,34 +2110,83 @@
     return score;
   }
 
+  // The OCR text with doubtful words trimmed off the ends of each line (shadows and creases
+  // near the store name tend to come out as low-confidence junk words).
+  function sureText(result) {
+    var lines = result && result.data && result.data.lines;
+    if (!lines || !lines.length) return "";
+    return lines.map(function (ln) {
+      var words = (ln.words || []).filter(function (w) { return w && w.text; });
+      while (words.length && words[0].confidence < 50) words.shift();
+      while (words.length && words[words.length - 1].confidence < 50) words.pop();
+      return words.map(function (w) { return w.text; }).join(" ");
+    }).join("\n");
+  }
+
   function readReceipt(image, token) {
     setReceiptHint("Reading the receipt…");
     var started = Date.now();
     var job = Promise.all([getOcrWorker(), decodeImage(image)]).then(function (pair) {
       var worker = pair[0], src = pair[1];
-      var best = { text: "", score: -1 };
-      var tries = [[0, false], [0, true], [90, false], [270, false], [90, true], [270, true], [180, false]];
-      function next(idx) {
-        if (idx >= tries.length || token !== photoToken) return best.text;
-        if (idx > 0 && (best.score >= 900 || Date.now() - started > 60000)) return best.text;
-        if (idx > 0) setReceiptHint("Reading the receipt… trying again.");
-        var canvas = prepareOcrCanvas(src, tries[idx][0], tries[idx][1]);
+      var paper = src;
+      try { paper = findReceiptPaper(src); } catch (e) { paper = src; }
+      var reads = [];
+      // Upright first: plain, black-and-white, and squeezed sideways (wide dot-matrix print such as
+      // "Amount:USD$47.04" on restaurant card slips reads far better squeezed). Rotations only if
+      // the upright reads found no amount at all.
+      var upright = [[0, false, 1], [0, true, 1], [0, true, 0.6]];
+      // Dot-matrix printers (restaurant card machines): blurred, black-and-white, squeezed, two sizes.
+      var dots = [[0, true, 0.7, 1.2, 900], [0, true, 0.5, 1.2, 900], [0, true, 0.7, 1.2, 1200], [0, true, 0.5, 1.2, 1200]];
+      var turned = [[90, false, 1], [270, false, 1], [90, true, 1], [270, true, 1], [180, false, 1]];
+      function goodEnough() {
+        var c = combineReceiptReads(reads, 0);
+        return amountInfoRank(c.amountInfo) >= 9 && !!c.date;
+      }
+      function needsDots() {
+        var c = combineReceiptReads(reads, 0);
+        var lines = c.texts.join("\n");
+        if (amountInfoRank(c.amountInfo) >= 8 && c.amountInfo.confirmed) return false;
+        // Labels were read ("Amount", "Total", "TIP") but no trustworthy number next to them.
+        return amountInfoRank(c.amountInfo) < 8 && /([MN]oun\s?t|[T1l]ota\s?l|\bTIP\b|USD)/i.test(lines) || !c.amountInfo.amount;
+      }
+      function runList(list, idx, stopEarly) {
+        if (idx >= list.length || token !== photoToken) return Promise.resolve();
+        if (Date.now() - started > 60000) return Promise.resolve();
+        if (stopEarly && reads.length && goodEnough()) return Promise.resolve();
+        if (reads.length) setReceiptHint("Reading the receipt… trying again.");
+        var t = list[idx];
+        var canvas = prepareOcrCanvas(paper, t[0], t[1], t[2], t[3], t[4]);
         return worker.recognize(canvas).then(function (result) {
           var text = result && result.data && result.data.text ? result.data.text : "";
-          var sc = readScore(text, result && result.data ? result.data.confidence : 0);
-          if (sc > best.score) best = { text: text, score: sc };
+          reads.push({ text: text, rot: t[0], sure: sureText(result), score: readScore(text, result && result.data ? result.data.confidence : 0) });
           canvas.width = canvas.height = 1;
-          return next(idx + 1);
+          return runList(list, idx + 1, stopEarly);
         });
       }
-      return next(0).then(function (text) {
+      return runList(upright, 0, true).then(function () {
+        if (token === photoToken && needsDots()) return runList(dots, 0, false);
+      }).then(function () {
+        var up = combineReceiptReads(reads, 0);
+        if (up.amountInfo.amount) return;
+        return runList(turned, 0, false);
+      }).then(function () {
         if (src && src.close) src.close();
-        return text;
+        var rots = {};
+        reads.forEach(function (r) { rots[r.rot] = true; });
+        var best = null;
+        Object.keys(rots).forEach(function (k) {
+          var c = combineReceiptReads(reads, Number(k));
+          var top = 0;
+          reads.forEach(function (r) { if (r.rot === Number(k) && r.score > top) top = r.score; });
+          c.rank = amountInfoRank(c.amountInfo) * 1000 + top;
+          if (!best || c.rank > best.rank) best = c;
+        });
+        return best || combineReceiptReads([], 0);
       });
     });
-    withTimeout(job, 90000).then(function (text) {
+    withTimeout(job, 90000).then(function (combined) {
       if (token !== photoToken || !spendFormOpen()) return;
-      applyReceiptText(text);
+      applyReceiptText(combined);
     }).catch(function (err) {
       if (token !== photoToken || !spendFormOpen()) return;
       var msg = err && err.message === "timeout"
@@ -4055,6 +4481,8 @@
     extractMerchant: extractMerchant,
     currentLearner: currentLearner,
     extractAmount: extractAmount,
+    extractAmountInfo: extractAmountInfo,
+    combineReceiptReads: combineReceiptReads,
     mergeCategoryLists: mergeCategoryLists,
     savingsAndLeftover: savingsAndLeftover,
     reminderOccurrences: reminderOccurrences,
