@@ -597,6 +597,9 @@
       <label class="btn btn-block" for="import-file" style="display:flex;align-items:center;justify-content:center;margin-top:8px;">Import backup</label>
       <input class="file-input" id="import-file" type="file" accept="application/json,.json" aria-label="Import backup file">
       <p id="settings-status" role="status"></p>
+      <h3>Sync</h3>
+      <p id="sync-diag" class="sub" role="status">Not synced yet.</p>
+      <button class="btn btn-primary btn-block" id="sync-now" type="button">Sync now</button>
       <h3>Shared log</h3>
       <p><a class="sheet-link" id="sheet-link" href="https://docs.google.com/spreadsheets/d/15Yk4zozMPdaJEURppm4JmCXb--HyCgOPW8-31RTd_8g/edit" target="_blank" rel="noopener noreferrer">Shared Google Sheet</a></p>
       <p class="sub">Income and spending saved on either phone show up on the other phone when each app is opened online, because both read the shared sheet. Photos stay on the phone that took them. A copy goes to the Receipts folder in Google Drive when you save. The other phone sees the receipt file name only.</p>
@@ -2779,6 +2782,13 @@
   var pullSeq = 0;
   var pullGeneration = 0;
 
+  function setSyncDiag(text) {
+    var el = document.getElementById("sync-diag");
+    var d = new Date();
+    var t = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+    if (el) el.textContent = "App version hm-v1.11.4. Last check " + t + ": " + text;
+  }
+
   function pullSheet() {
     if (sheetPullSkipped()) return;
     if (!SHEET_SYNC_URL || !SHEET_SYNC_TOKEN) return;
@@ -2795,8 +2805,14 @@
       try { delete window[name]; } catch (err) { window[name] = undefined; }
       if (script.parentNode) script.parentNode.removeChild(script);
       if (generation !== pullGeneration) return;
-      if (!payload) return;
-      if (Array.isArray(payload.entries)) mergePulledEntries(payload.entries);
+      if (!payload) { setSyncDiag("No answer from the shared sheet (blocked or offline)."); return; }
+      if (Array.isArray(payload.entries)) {
+        var before = entries.length;
+        mergePulledEntries(payload.entries);
+        setSyncDiag("Sheet has " + payload.entries.length + " entries. This phone has " + entries.length + " (" + Math.max(0, entries.length - before) + " new).");
+      } else {
+        setSyncDiag("The sheet answered but sent no entries" + (payload.error ? ": " + String(payload.error).slice(0, 80) : "") + ".");
+      }
       if (Array.isArray(payload.categories)) mergePulledCategories(payload.categories);
       if (Array.isArray(payload.reminders)) {
         reminderSyncReady = true;
@@ -4458,6 +4474,13 @@
   pullSheet();
   checkReminders();
   setInterval(checkReminders, 60000);
+  var syncNowBtn = document.getElementById("sync-now");
+  if (syncNowBtn) syncNowBtn.addEventListener("click", function () {
+    var el = document.getElementById("sync-diag");
+    if (el) el.textContent = "Checking the shared sheet...";
+    if (sheetPullSkipped()) { setSyncDiag("Sync is off on localhost."); return; }
+    refreshFromSheet();
+  });
   var lastPullAt = Date.now();
   function refreshFromSheet() {
     lastPullAt = Date.now();

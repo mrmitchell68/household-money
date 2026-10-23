@@ -1,4 +1,4 @@
-"""Receipt scan checks for hm-v1.10.0+ (still valid in hm-v1.11.3; real-receipt parser checks added in hm-v1.11.3): date parsing, category guessing, and the scan flow.
+"""Receipt scan checks for hm-v1.10.0+ (still valid in hm-v1.11.4; real-receipt parser checks added in hm-v1.11.4): date parsing, category guessing, and the scan flow.
 Runs against http://127.0.0.1:8788/ with system Chrome. Google is never contacted."""
 import json
 import sys
