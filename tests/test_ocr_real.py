@@ -1,4 +1,4 @@
-"""Real Tesseract OCR on phone-size receipt photos (hm-v1.11.2). No OCR stub. Google is never contacted.
+"""Real Tesseract OCR on phone-size receipt photos (hm-v1.11.3). No OCR stub. Google is never contacted.
 Includes Allen's two real receipts (tests/fixtures) with the results they must give.
 Run a static server on 127.0.0.1:8788 first."""
 import json

@@ -4458,9 +4458,25 @@
   pullSheet();
   checkReminders();
   setInterval(checkReminders, 60000);
+  var lastPullAt = Date.now();
+  function refreshFromSheet() {
+    lastPullAt = Date.now();
+    flushSyncQueue();
+    pullSheet();
+  }
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible") checkReminders();
+    if (document.visibilityState === "visible") {
+      checkReminders();
+      refreshFromSheet();
+    }
   });
+  window.addEventListener("focus", function () {
+    if (Date.now() - lastPullAt > 5000) refreshFromSheet();
+  });
+  window.addEventListener("online", refreshFromSheet);
+  setInterval(function () {
+    if (document.visibilityState === "visible") refreshFromSheet();
+  }, 30000);
 
   window.HM = {
     summarize: summarize,
