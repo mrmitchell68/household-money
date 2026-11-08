@@ -324,12 +324,14 @@
         <h2 id="month-title">This month</h2>
         <p class="sub" id="month-range">The 1st through today</p>
         <div class="stats">
+          <div class="stat"><div class="label">Starting balance (from last month)</div><div class="num" id="month-start">$0.00</div></div>
           <div class="stat"><div class="label">Money in</div><div class="num in" id="month-in">$0.00</div></div>
           <div class="stat"><div class="label">Money out</div><div class="num out" id="month-out">$0.00</div></div>
-          <div class="stat"><div class="label">Left</div><div class="num" id="month-left">$0.00</div></div>
+          <div class="stat"><div class="label">Saved</div><div class="num" id="month-saved">$0.00</div></div>
+          <div class="stat"><div class="label">Balance left</div><div class="num" id="month-left">$0.00</div></div>
         </div>
       </section>
-      <p class="sub">Left is money in minus money out. Saved on this phone.</p>
+      <p class="sub">Balance left is the starting balance plus money in, minus money out and savings. It rolls into next month.</p>
       <section class="panel" aria-labelledby="savings-title">
         <h2 id="savings-title">Savings</h2>
         <p class="sub">Money set aside is not spending. What is left rolls to next month, even if it is negative.</p>
@@ -2520,6 +2522,9 @@
     setSigned("saved-total", roll.totalSaved);
     setSigned("carried-in", roll.carriedIn);
     setSigned("left-rolls", roll.leftNow);
+    setSigned("month-start", roll.carriedIn);
+    setSigned("month-saved", roll.savedThisMonth);
+    setSigned("month-left", roll.leftNow);
     document.getElementById("month-range").textContent = formatEntryDate(monthStart) + " through " + formatEntryDate(today);
     revokeThumbs();
     var list = document.getElementById("recent");
@@ -2786,7 +2791,7 @@
     var el = document.getElementById("sync-diag");
     var d = new Date();
     var t = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
-    if (el) el.textContent = "App version hm-v1.11.4. Last check " + t + ": " + text;
+    if (el) el.textContent = "App version hm-v1.11.5. Last check " + t + ": " + text;
   }
 
   function pullSheet() {
