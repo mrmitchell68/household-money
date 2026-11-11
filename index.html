@@ -51,7 +51,17 @@
     }
     .appbar a { color: #fff; font-weight: 700; text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; padding: 0 2px; }
     .brand { font-size: 1.35rem; letter-spacing: 0.01em; white-space: nowrap; }
-    .appbar nav { display: flex; gap: 14px; margin-left: auto; }
+    .appbar nav { display: flex; gap: 14px; margin-left: auto; flex-wrap: wrap; }
+    select {
+      font: inherit;
+      color: inherit;
+      width: 100%;
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: #fff;
+    }
     .wrap { padding: 14px 14px 24px; max-width: 720px; margin: 0 auto; }
     h1, h2, h3 { margin: 0; line-height: 1.2; }
     h2 { font-size: 1.35rem; }
@@ -290,6 +300,7 @@
   <header class="appbar">
     <a class="brand" href="#/">Household Money</a>
     <nav aria-label="Sections">
+      <a href="#/trips">Trips</a>
       <a href="#/reminders">Reminders</a>
       <a href="#/categories">Categories</a>
       <a href="#/settings">Settings</a>
@@ -300,6 +311,14 @@
     <div id="view-home">
       <div id="due-list" aria-live="polite"></div>
       <p class="hint" id="home-status" aria-live="polite"></p>
+      <section class="panel" id="home-trip" hidden aria-labelledby="home-trip-title">
+        <h2 id="home-trip-title">This trip</h2>
+        <p class="sub" id="home-trip-range"></p>
+        <div class="stats">
+          <div class="stat"><div class="label">Trip spending</div><div class="num out" id="home-trip-total">$0.00</div></div>
+        </div>
+        <a class="btn btn-block" id="home-trip-link" href="#/trips" style="margin-top:10px;display:flex;align-items:center;justify-content:center;">Open trip</a>
+      </section>
       <section class="panel" aria-labelledby="week-title">
         <div class="week-nav">
           <button class="btn" id="week-prev" type="button" aria-label="Previous week">&lsaquo; Prev</button>
@@ -379,6 +398,9 @@
       <form id="spend-form" autocomplete="off">
         <label class="field" for="spend-date">Date</label>
         <input id="spend-date" name="date" type="date" required>
+        <label class="field" for="spend-trip">Trip</label>
+        <select id="spend-trip" name="trip"></select>
+        <p class="hint" id="spend-trip-hint">Spending still counts in the week and month totals. Choose No trip to leave it off the trip list.</p>
         <label class="check-row" for="spend-remind">
           <input id="spend-remind" type="checkbox">
           <span>Remind me each month</span>
@@ -471,6 +493,50 @@
         <p class="hint">Put aside stores the amount as savings. Take out puts that money back in the household pot. This is not spending.</p>
         <p class="error" id="savings-error" role="alert"></p>
         <button class="btn btn-primary btn-block" id="savings-save" type="submit">Save</button>
+      </form>
+    </div>
+
+    <div id="view-trips" hidden>
+      <a class="back" href="#/">Back</a>
+      <h2>Trips</h2>
+      <p class="sub">Keep spending on a trip in one place, with a total and a list by category. That spending still counts in the week and month totals. You can add another trip whenever you need one.</p>
+      <div id="trip-list"></div>
+      <a class="btn btn-primary btn-block" href="#/trips/new" style="margin-top:12px;display:flex;align-items:center;justify-content:center;">Add a trip</a>
+    </div>
+
+    <div id="view-trip" hidden>
+      <a class="back" href="#/trips">All trips</a>
+      <h2 id="trip-title">Trip</h2>
+      <p class="sub" id="trip-range"></p>
+      <div class="panel">
+        <div class="stats">
+          <div class="stat"><div class="label">Trip spending</div><div class="num out" id="trip-total">$0.00</div></div>
+        </div>
+      </div>
+      <h3>By category</h3>
+      <div id="trip-cats"></div>
+      <h3>Entries</h3>
+      <div id="trip-entries"></div>
+      <div class="row-actions" style="margin-top:12px">
+        <a class="btn" id="trip-edit-link" href="#/trips">Edit trip</a>
+        <button class="btn" id="trip-delete" type="button">Delete trip</button>
+      </div>
+      <p class="hint">Deleting a trip does not delete the spending.</p>
+    </div>
+
+    <div id="view-trip-form" hidden>
+      <a class="back" id="trip-form-back" href="#/trips">Back</a>
+      <h2 id="trip-form-title">Add a trip</h2>
+      <form id="trip-form" autocomplete="off">
+        <input id="trip-form-id" type="hidden" value="">
+        <label class="field" for="trip-name">Name</label>
+        <input id="trip-name" name="name" type="text" maxlength="80" required placeholder="Weekend trip">
+        <label class="field" for="trip-start">Start date</label>
+        <input id="trip-start" name="start" type="date" required>
+        <label class="field" for="trip-end">End date</label>
+        <input id="trip-end" name="end" type="date" required>
+        <p class="error" id="trip-form-error" role="alert"></p>
+        <button class="btn btn-primary btn-block" id="trip-form-save" type="submit">Save trip</button>
       </form>
     </div>
 
@@ -595,6 +661,7 @@
       <p>A receipt photo can fill in the amount, store, and date, and this phone remembers which category you used for that store. For a store it has not seen, it guesses a category from your past entries on both phones and from common store names. You can always change the date and category before you save, and a change teaches it for next time.</p>
       <p>Savings you put aside or take out is saved the same way and is not counted as spending. What is left after income, spending, and savings carries to the next month, even if it is negative.</p>
       <p>Bill reminders are shared the same way. A reminder is not spending until you tap Approve, and you can change the date first.</p>
+      <p>Trips you add stay on this phone for now, because the shared sheet cannot store trip names yet. Spending both of you save still shows on a trip if its date falls during that trip, unless you mark it No trip on this phone. Trip spending still counts in the week and month totals.</p>
       <button class="btn btn-primary btn-block" id="export-backup" type="button">Export backup</button>
       <label class="btn btn-block" for="import-file" style="display:flex;align-items:center;justify-content:center;margin-top:8px;">Import backup</label>
       <input class="file-input" id="import-file" type="file" accept="application/json,.json" aria-label="Import backup file">
@@ -631,6 +698,8 @@
   var KEY_REMINDERS = "hm.reminders.v1";
   var KEY_REMINDER_TOMB = "hm.reminders.tomb.v1";
   var KEY_NOTIFY_ASKED = "hm.notify.asked";
+  var KEY_TRIPS = "hm.trips.v1";
+  var DEFAULT_TRIP = { id: "trip-2026-11-10-15", name: "Trip Nov 10–15, 2026", start: "2026-11-10", end: "2026-11-15" };
   var SYNC_QUEUE_CAP = 50;
   var DB_NAME = "household-money";
   var DB_STORE = "photos";
@@ -640,6 +709,7 @@
   var entries = [];
   var categories = [];
   var reminders = [];
+  var trips = [];
   var pendingHomeNote = "";
   var notifiedKeys = {};
   var approveTarget = null;
@@ -712,6 +782,120 @@
     var d = now || new Date();
     return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-01";
   }
+
+  function isYMD(value) {
+    return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  }
+
+  function sanitizeTrip(raw) {
+    if (!raw || raw.id == null || raw.id === "") return null;
+    var name = String(raw.name || "").replace(/^\s+|\s+$/g, "").slice(0, 80);
+    if (!name || !isYMD(raw.start) || !isYMD(raw.end)) return null;
+    if (raw.end < raw.start) return null;
+    return { id: String(raw.id).slice(0, 80), name: name, start: raw.start, end: raw.end };
+  }
+
+  function loadTrips() {
+    var raw = localStorage.getItem(KEY_TRIPS);
+    if (raw == null) {
+      var seeded = [sanitizeTrip(DEFAULT_TRIP)];
+      localStorage.setItem(KEY_TRIPS, JSON.stringify(seeded));
+      return seeded;
+    }
+    try {
+      var list = JSON.parse(raw);
+      if (!Array.isArray(list)) return [];
+      var out = [];
+      var seen = {};
+      list.forEach(function (item) {
+        var trip = sanitizeTrip(item);
+        if (!trip || seen[trip.id]) return;
+        seen[trip.id] = true;
+        out.push(trip);
+      });
+      return out;
+    } catch (err) {
+      return [];
+    }
+  }
+
+  function saveTrips(list) {
+    localStorage.setItem(KEY_TRIPS, JSON.stringify(list));
+  }
+
+  function findTrip(id, list) {
+    var found = null;
+    (list || trips).forEach(function (t) {
+      if (t && t.id === id) found = t;
+    });
+    return found;
+  }
+
+  function tripsCoveringDate(list, date) {
+    if (!isYMD(date)) return [];
+    return (list || []).filter(function (t) {
+      return t && t.start <= date && date <= t.end;
+    }).slice().sort(function (a, b) {
+      return b.start.localeCompare(a.start) || b.end.localeCompare(a.end) || a.name.localeCompare(b.name);
+    });
+  }
+
+  function defaultTripForDate(list, date) {
+    var hits = tripsCoveringDate(list, date);
+    return hits.length ? hits[0] : null;
+  }
+
+  function normalizeTripOverride(value, list) {
+    if (value == null || value === "") return "";
+    if (value === "none") return "none";
+    var id = String(value);
+    return findTrip(id, list) ? id : "";
+  }
+
+  function entryTripId(entry, list) {
+    if (!entry || entry.type !== "spending") return "";
+    var ov = normalizeTripOverride(entry.tripOverride, list);
+    if (ov === "none") return "none";
+    if (ov) return ov;
+    var auto = defaultTripForDate(list, entry.date);
+    return auto ? auto.id : "";
+  }
+
+  function entryBelongsToTrip(entry, trip, list) {
+    if (!entry || !trip || entry.type !== "spending") return false;
+    return entryTripId(entry, list) === trip.id;
+  }
+
+  function tripSpending(list, items, trip) {
+    var rows = [];
+    var total = 0;
+    var byCat = {};
+    (items || []).forEach(function (e) {
+      if (!entryBelongsToTrip(e, trip, list)) return;
+      var cents = Math.round(Number(e.amountCents) || 0);
+      rows.push(e);
+      total += cents;
+      var cat = e.category || "Uncategorized";
+      byCat[cat] = (byCat[cat] || 0) + cents;
+    });
+    rows.sort(function (a, b) {
+      return String(a.date).localeCompare(String(b.date)) || String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+    });
+    var cats = Object.keys(byCat).sort(function (a, b) {
+      return byCat[b] - byCat[a] || a.localeCompare(b);
+    }).map(function (name) {
+      return { name: name, amountCents: byCat[name] };
+    });
+    return { total: total, byCategory: cats, entries: rows };
+  }
+
+  function chosenTripOverride(selected, date, list) {
+    var auto = defaultTripForDate(list, date);
+    if (!selected || selected === "none") return auto ? "none" : "";
+    if (auto && selected === auto.id) return "";
+    return findTrip(selected, list) ? selected : "";
+  }
+
 
   function parseCents(raw) {
     var s = String(raw == null ? "" : raw).trim().replace(/[$,\s]/g, "");
@@ -2526,6 +2710,20 @@
     setSigned("month-saved", roll.savedThisMonth);
     setSigned("month-left", roll.leftNow);
     document.getElementById("month-range").textContent = formatEntryDate(monthStart) + " through " + formatEntryDate(today);
+    var homeTrip = document.getElementById("home-trip");
+    if (homeTrip) {
+      var active = defaultTripForDate(trips, today);
+      if (active) {
+        var tripSum = tripSpending(trips, entries, active);
+        homeTrip.hidden = false;
+        document.getElementById("home-trip-title").textContent = active.name;
+        document.getElementById("home-trip-range").textContent = formatEntryDate(active.start) + " through " + formatEntryDate(active.end);
+        document.getElementById("home-trip-total").textContent = formatUSD(tripSum.total);
+        document.getElementById("home-trip-link").href = "#/trips/" + encodeURIComponent(active.id);
+      } else {
+        homeTrip.hidden = true;
+      }
+    }
     revokeThumbs();
     var list = document.getElementById("recent");
     list.textContent = "";
@@ -2555,6 +2753,11 @@
     var main = el("div", "entry-main");
     main.appendChild(el("div", "entry-title", title));
     var meta = formatEntryDate(e.date);
+    if (e.type === "spending") {
+      var tripId = entryTripId(e, trips);
+      var onTrip = tripId && tripId !== "none" ? findTrip(tripId, trips) : null;
+      if (onTrip) meta += " · " + onTrip.name;
+    }
     if (e.note) meta += " · " + e.note;
     main.appendChild(el("div", "entry-meta", meta));
     if (e.receiptName) main.appendChild(el("div", "receipt-name", e.receiptName));
@@ -2791,7 +2994,7 @@
     var el = document.getElementById("sync-diag");
     var d = new Date();
     var t = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
-    if (el) el.textContent = "App version hm-v1.11.5. Last check " + t + ": " + text;
+    if (el) el.textContent = "App version hm-v1.11.6. Last check " + t + ": " + text;
   }
 
   function pullSheet() {
@@ -3098,6 +3301,7 @@
       document.getElementById("spend-remind").checked = false;
       syncSpendRemindFields();
       renderCategoryChips(null);
+      fillSpendTripSelect("", document.getElementById("spend-date").value);
       return;
     }
     editingEntryId = existing.id;
@@ -3110,6 +3314,7 @@
     syncSpendRemindFields();
     renderCategoryChips(existing.category);
     showKeptReceipt(existing);
+    fillSpendTripSelect(entryTripId(existing, trips) || "none", existing.date);
   }
 
   function syncSpendRemindFields() {
@@ -3120,7 +3325,7 @@
   }
 
   function showView(name, focusHeading) {
-    ["home", "income", "spend", "savings", "categories", "reminders", "approve", "settings"].forEach(function (view) {
+    ["home", "income", "spend", "savings", "trips", "trip", "trip-form", "categories", "reminders", "approve", "settings"].forEach(function (view) {
       document.getElementById("view-" + view).hidden = view !== name;
     });
     document.body.classList.toggle("with-dock", name === "home");
@@ -3134,6 +3339,9 @@
     if (name === "income") openIncome();
     if (name === "spend") openSpend();
     if (name === "savings") openSavings();
+    if (name === "trips") renderTripList();
+    if (name === "trip") renderTripDetail();
+    if (name === "trip-form") openTripForm();
     if (name === "categories") renderCategories();
     if (name === "reminders") openReminders();
     if (name === "approve") openApprove();
@@ -3157,6 +3365,7 @@
     if (h.indexOf("#/income") === 0) name = "income";
     else if (h.indexOf("#/spend") === 0) name = "spend";
     else if (h.indexOf("#/savings") === 0) name = "savings";
+    else if (h.indexOf("#/trips") === 0) name = tripRouteView();
     else if (h.indexOf("#/approve") === 0) name = "approve";
     else if (h.indexOf("#/reminders") === 0) name = "reminders";
     else if (h.indexOf("#/categories") === 0) name = "categories";
@@ -3304,6 +3513,8 @@
     var date = document.getElementById("spend-date").value;
     var cents = parseCents(document.getElementById("spend-amount").value);
     var note = document.getElementById("spend-note").value.trim().slice(0, 200);
+    var tripSel = document.getElementById("spend-trip");
+    var tripOverride = chosenTripOverride(tripSel ? tripSel.value : "", date, trips);
     if (!picked) { err.textContent = "Choose a category."; return; }
     if (!date) { err.textContent = "Choose a date."; return; }
     if (cents == null) { err.textContent = "Enter an amount more than zero."; document.getElementById("spend-amount").focus(); return; }
@@ -3349,6 +3560,8 @@
           entry.hasPhoto = hasPhoto;
           entry.receiptName = receiptName;
           entry.synced = false;
+          if (tripOverride) entry.tripOverride = tripOverride;
+          else delete entry.tripOverride;
         } else {
           entry = {
             id: id,
@@ -3361,6 +3574,7 @@
             hasPhoto: hasPhoto,
             receiptName: receiptName
           };
+          if (tripOverride) entry.tripOverride = tripOverride;
           entries.push(entry);
         }
         saveEntries(entries);
@@ -3511,6 +3725,9 @@
       if (raw.type === "savings") entry.category = "";
     } else {
       entry.category = String(raw.category || "Uncategorized").slice(0, 40);
+      if (raw.tripOverride === "none" || (typeof raw.tripOverride === "string" && raw.tripOverride)) {
+        entry.tripOverride = String(raw.tripOverride).slice(0, 80);
+      }
     }
     return entry;
   }
@@ -3551,6 +3768,7 @@
           version: 1,
           exportedAt: new Date().toISOString(),
           categories: categories,
+          trips: trips,
           entries: entries,
           photosIncluded: include,
           photoNote: photoNote,
@@ -3592,6 +3810,14 @@
           if (!findCategory(clean)) categories.push(clean);
         });
         saveCategories(categories);
+      }
+      if (Array.isArray(data.trips)) {
+        data.trips.forEach(function (raw) {
+          var trip = sanitizeTrip(raw);
+          if (!trip || findTrip(trip.id, trips)) return;
+          trips.push(trip);
+        });
+        saveTrips(trips);
       }
       saveEntries(entries);
       var photoChain = Promise.resolve();
@@ -4394,6 +4620,186 @@
     });
   }
 
+
+  function fillSpendTripSelect(selected, date) {
+    var sel = document.getElementById("spend-trip");
+    if (!sel) return;
+    var auto = defaultTripForDate(trips, date);
+    var value = selected;
+    if (!value) value = auto ? auto.id : "none";
+    sel.textContent = "";
+    var none = document.createElement("option");
+    none.value = "none";
+    none.textContent = "No trip";
+    sel.appendChild(none);
+    var sorted = trips.slice().sort(function (a, b) {
+      return String(b.start).localeCompare(String(a.start)) || a.name.localeCompare(b.name);
+    });
+    sorted.forEach(function (t) {
+      var opt = document.createElement("option");
+      opt.value = t.id;
+      opt.textContent = t.name;
+      sel.appendChild(opt);
+    });
+    if (value !== "none" && !findTrip(value, trips)) value = auto ? auto.id : "none";
+    sel.value = value;
+  }
+
+  function tripRouteParts() {
+    var h = location.hash || "";
+    if (h.indexOf("#/trips") !== 0) return { view: "trips", id: "" };
+    var rest = h.slice(7);
+    if (!rest || rest === "/") return { view: "trips", id: "" };
+    rest = rest.replace(/^\//, "").split(/[?#]/)[0];
+    if (rest === "new") return { view: "trip-form", id: "" };
+    var parts = rest.split("/");
+    var id = "";
+    try { id = decodeURIComponent(parts[0] || ""); } catch (err) { id = parts[0] || ""; }
+    if (parts[1] === "edit") return { view: "trip-form", id: id };
+    return { view: "trip", id: id };
+  }
+
+  function tripRouteView() {
+    return tripRouteParts().view;
+  }
+
+  function renderTripList() {
+    var box = document.getElementById("trip-list");
+    box.textContent = "";
+    if (!trips.length) {
+      box.appendChild(el("p", "empty", "No trips yet. Add one to keep that spending in its own list."));
+      return;
+    }
+    var sorted = trips.slice().sort(function (a, b) {
+      return String(b.start).localeCompare(String(a.start)) || a.name.localeCompare(b.name);
+    });
+    sorted.forEach(function (t) {
+      var sum = tripSpending(trips, entries, t);
+      var row = el("article", "entry");
+      var main = el("div", "entry-main");
+      var link = document.createElement("a");
+      link.href = "#/trips/" + encodeURIComponent(t.id);
+      link.className = "entry-title";
+      link.textContent = t.name;
+      main.appendChild(link);
+      main.appendChild(el("div", "entry-meta", formatEntryDate(t.start) + " through " + formatEntryDate(t.end)));
+      row.appendChild(main);
+      var amt = el("div", "entry-amt out");
+      amt.textContent = formatUSD(sum.total);
+      row.appendChild(amt);
+      box.appendChild(row);
+    });
+  }
+
+  function renderTripDetail() {
+    var id = tripRouteParts().id;
+    var trip = findTrip(id, trips);
+    if (!trip) {
+      location.hash = "#/trips";
+      return;
+    }
+    var sum = tripSpending(trips, entries, trip);
+    document.getElementById("trip-title").textContent = trip.name;
+    document.getElementById("trip-range").textContent = formatEntryDate(trip.start) + " through " + formatEntryDate(trip.end);
+    document.getElementById("trip-total").textContent = formatUSD(sum.total);
+    document.getElementById("trip-edit-link").href = "#/trips/" + encodeURIComponent(trip.id) + "/edit";
+    var cats = document.getElementById("trip-cats");
+    cats.textContent = "";
+    if (!sum.byCategory.length) {
+      cats.appendChild(el("p", "empty", "No spending in this trip yet."));
+    } else {
+      sum.byCategory.forEach(function (c) {
+        var row = el("div", "entry");
+        var main = el("div", "entry-main");
+        main.appendChild(el("div", "entry-title", c.name));
+        row.appendChild(main);
+        var amt = el("div", "entry-amt out");
+        amt.textContent = formatUSD(c.amountCents);
+        row.appendChild(amt);
+        cats.appendChild(row);
+      });
+    }
+    var list = document.getElementById("trip-entries");
+    list.textContent = "";
+    if (!sum.entries.length) {
+      list.appendChild(el("p", "empty", "Add spending and leave it on this trip, or save spending dated during these days."));
+    } else {
+      sum.entries.forEach(function (e) { list.appendChild(entryRow(e)); });
+      sum.entries.forEach(function (e) { if (e.hasPhoto) attachThumb(e.id); });
+    }
+  }
+
+  function openTripForm() {
+    var id = tripRouteParts().id;
+    var existing = id ? findTrip(id, trips) : null;
+    var title = document.getElementById("trip-form-title");
+    var back = document.getElementById("trip-form-back");
+    document.getElementById("trip-form-error").textContent = "";
+    if (!existing) {
+      document.getElementById("trip-form-id").value = "";
+      document.getElementById("trip-name").value = "";
+      document.getElementById("trip-start").value = todayYMD();
+      document.getElementById("trip-end").value = todayYMD();
+      document.getElementById("trip-form-save").textContent = "Save trip";
+      if (title) title.textContent = "Add a trip";
+      if (back) back.href = "#/trips";
+      return;
+    }
+    document.getElementById("trip-form-id").value = existing.id;
+    document.getElementById("trip-name").value = existing.name;
+    document.getElementById("trip-start").value = existing.start;
+    document.getElementById("trip-end").value = existing.end;
+    document.getElementById("trip-form-save").textContent = "Save changes";
+    if (title) title.textContent = "Edit trip";
+    if (back) back.href = "#/trips/" + encodeURIComponent(existing.id);
+  }
+
+  function onTripSubmit(ev) {
+    ev.preventDefault();
+    var err = document.getElementById("trip-form-error");
+    err.textContent = "";
+    var name = document.getElementById("trip-name").value.replace(/^\s+|\s+$/g, "").slice(0, 80);
+    var start = document.getElementById("trip-start").value;
+    var end = document.getElementById("trip-end").value;
+    if (!name) { err.textContent = "Enter a trip name."; return; }
+    if (!isYMD(start) || !isYMD(end)) { err.textContent = "Choose a start date and an end date."; return; }
+    if (end < start) { err.textContent = "The end date has to be on or after the start date."; return; }
+    var id = document.getElementById("trip-form-id").value;
+    var existing = id ? findTrip(id, trips) : null;
+    if (existing) {
+      existing.name = name;
+      existing.start = start;
+      existing.end = end;
+    } else {
+      var trip = sanitizeTrip({ id: newId(), name: name, start: start, end: end });
+      if (!trip) { err.textContent = "Could not save that trip."; return; }
+      trips.push(trip);
+      id = trip.id;
+    }
+    try {
+      saveTrips(trips);
+    } catch (e) {
+      err.textContent = "This phone blocked saving. Free some space and try again.";
+      return;
+    }
+    location.hash = "#/trips/" + encodeURIComponent(id);
+  }
+
+  function deleteTrip(id) {
+    var trip = findTrip(id, trips);
+    if (!trip) return;
+    if (!confirm('Delete "' + trip.name + '"? Spending stays in the week and month totals. It is only removed from this trip list.')) return;
+    trips = trips.filter(function (t) { return t.id !== id; });
+    entries.forEach(function (e) {
+      if (e && e.tripOverride === id) delete e.tripOverride;
+    });
+    try {
+      saveTrips(trips);
+      saveEntries(entries);
+    } catch (err) {}
+    location.hash = "#/trips";
+  }
+
   function bind() {
     document.getElementById("week-prev").addEventListener("click", function () { weekOffset -= 1; renderHome(); });
     document.getElementById("week-next").addEventListener("click", function () { weekOffset += 1; renderHome(); });
@@ -4402,7 +4808,16 @@
     document.getElementById("go-savings").addEventListener("click", function () { location.hash = "#/savings"; });
     document.getElementById("income-form").addEventListener("submit", onIncomeSubmit);
     document.getElementById("spend-form").addEventListener("submit", onSpendSubmit);
+    document.getElementById("spend-date").addEventListener("change", function () {
+      if (editingEntryId) return;
+      fillSpendTripSelect("", document.getElementById("spend-date").value);
+    });
     document.getElementById("spend-remind").addEventListener("change", syncSpendRemindFields);
+    document.getElementById("trip-form").addEventListener("submit", onTripSubmit);
+    document.getElementById("trip-delete").addEventListener("click", function () {
+      var id = tripRouteParts().id;
+      if (id) deleteTrip(id);
+    });
     document.getElementById("savings-form").addEventListener("submit", onSavingsSubmit);
     document.getElementById("spend-camera").addEventListener("change", function (ev) {
       var file = ev.target.files && ev.target.files[0];
@@ -4471,6 +4886,7 @@
   entries = loadEntries();
   categories = loadCategories();
   reminders = loadReminders();
+  trips = loadTrips();
   seedLearned();
   bind();
   route(false);
@@ -4529,6 +4945,14 @@
     combineReceiptReads: combineReceiptReads,
     mergeCategoryLists: mergeCategoryLists,
     savingsAndLeftover: savingsAndLeftover,
+    DEFAULT_TRIP: DEFAULT_TRIP,
+    sanitizeTrip: sanitizeTrip,
+    defaultTripForDate: defaultTripForDate,
+    tripsCoveringDate: tripsCoveringDate,
+    entryTripId: entryTripId,
+    entryBelongsToTrip: entryBelongsToTrip,
+    tripSpending: tripSpending,
+    chosenTripOverride: chosenTripOverride,
     reminderOccurrences: reminderOccurrences,
     ordinalDay: ordinalDay,
     mergePulledReminders: mergePulledReminders,
