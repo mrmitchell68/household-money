@@ -306,9 +306,34 @@
     .report-legend li { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
     .report-swatch { width: 14px; height: 14px; border-radius: 4px; flex: 0 0 14px; }
     .print-only { display: none; }
+    .report-omit-btn {
+      min-width: 44px;
+      min-height: 44px;
+      border-radius: 12px;
+      border: 2px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      font-weight: 800;
+      font-size: 1.1rem;
+      line-height: 1;
+      padding: 0 10px;
+    }
+    .report-omit-btn.restore { color: var(--green-dark); border-color: var(--green); font-size: 0.85rem; padding: 0 8px; }
+    .report-table tr.report-omitted td { text-decoration: line-through; color: var(--muted); }
+    .report-omit-line { margin: 8px 0 12px; color: var(--muted); font-weight: 750; }
+    .report-omit-line button {
+      min-height: 44px;
+      margin-left: 8px;
+      border: 0;
+      background: none;
+      color: var(--green-dark);
+      font-weight: 800;
+      text-decoration: underline;
+      padding: 0 6px;
+    }
     @media print {
       .print-only { display: block !important; }
-      .no-print, .appbar, #report-print { display: none !important; }
+      .no-print, .appbar, #report-print, .report-omit-line, .report-omitted, .report-omit-btn { display: none !important; }
       body { background: #fff; color: #000; }
       body.with-dock { padding-bottom: 0; }
       .wrap { padding: 0; max-width: none; margin: 0; }
@@ -567,7 +592,7 @@
     <div id="view-report" hidden>
       <a class="back no-print" href="#/">Back</a>
       <h2 class="no-print">Report</h2>
-      <p class="sub no-print">Pick a start and end date to see spending, totals by category from high to low, and a pie chart. Income and savings are left out. Trip spending in these dates is included. On a phone, tap Save / Print PDF and choose Save as PDF as the printer.</p>
+      <p class="sub no-print">Pick a start and end date to see spending, totals by category from high to low, and a pie chart. Income and savings are left out. Trip spending in these dates is included. You can take items or a whole category off this report only; that does not delete the spending. Close the Entries list to leave it off the PDF. On a phone, tap Save / Print PDF and choose Save as PDF as the printer.</p>
       <div id="report-form" class="no-print">
         <label class="field" for="report-start">Start date</label>
         <input id="report-start" name="start" type="date" required>
@@ -590,8 +615,10 @@
         </div>
         <h3>By category</h3>
         <div id="report-cats-wrap"></div>
-        <details id="report-entries-wrap">
+        <p class="report-omit-line no-print" id="report-omit-line" hidden></p>
+        <details id="report-entries-wrap" open>
           <summary>Entries</summary>
+          <p class="hint no-print">Close this list to leave the entries off the PDF. Items you remove stay visible here with a line through them, and they are left off the PDF.</p>
           <div id="report-entries-wrap-inner"></div>
         </details>
       </div>
@@ -984,24 +1011,44 @@
     return "M " + cx + " " + cy + " L " + p0[0].toFixed(3) + " " + p0[1].toFixed(3) + " A " + r + " " + r + " 0 " + large + " 1 " + p1[0].toFixed(3) + " " + p1[1].toFixed(3) + " Z";
   }
 
-  function spendingReport(list, startYMD, endYMD) {
+  function normalizeOmitIds(omittedIds) {
+    var map = {};
+    if (!omittedIds) return map;
+    if (Array.isArray(omittedIds)) {
+      omittedIds.forEach(function (id) {
+        if (id != null && id !== "") map[String(id)] = true;
+      });
+      return map;
+    }
+    Object.keys(omittedIds).forEach(function (k) {
+      if (omittedIds[k]) map[String(k)] = true;
+    });
+    return map;
+  }
+
+  function spendingReport(list, startYMD, endYMD, omittedIds) {
     if (!isYMD(startYMD) || !isYMD(endYMD)) {
-      return { ok: false, error: "Choose a start date and an end date.", total: 0, categories: [], entries: [] };
+      return { ok: false, error: "Choose a start date and an end date.", total: 0, categories: [], entries: [], omitted: [] };
     }
     if (endYMD < startYMD) {
-      return { ok: false, error: "The end date has to be on or after the start date.", total: 0, categories: [], entries: [] };
+      return { ok: false, error: "The end date has to be on or after the start date.", total: 0, categories: [], entries: [], omitted: [] };
     }
+    var omit = normalizeOmitIds(omittedIds);
     var items = [];
+    var omitted = [];
     (list || []).forEach(function (e) {
       if (!e || e.type !== "spending") return;
       if (typeof e.date !== "string" || e.date < startYMD || e.date > endYMD) return;
       var cents = Math.round(Number(e.amountCents) || 0);
       if (cents <= 0) return;
-      items.push(e);
+      if (omit[String(e.id)]) omitted.push(e);
+      else items.push(e);
     });
-    items.sort(function (a, b) {
+    function byDate(a, b) {
       return String(a.date).localeCompare(String(b.date)) || String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.id || "").localeCompare(String(b.id || ""));
-    });
+    }
+    items.sort(byDate);
+    omitted.sort(byDate);
     var total = 0;
     var byCat = {};
     items.forEach(function (e) {
@@ -1023,7 +1070,7 @@
         color: REPORT_COLORS[i % REPORT_COLORS.length]
       };
     });
-    return { ok: true, start: startYMD, end: endYMD, total: total, categories: categories, entries: items };
+    return { ok: true, start: startYMD, end: endYMD, total: total, categories: categories, entries: items, omitted: omitted };
   }
 
 
@@ -3124,7 +3171,7 @@
     var el = document.getElementById("sync-diag");
     var d = new Date();
     var t = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
-    if (el) el.textContent = "App version hm-v1.12.0. Last check " + t + ": " + text;
+    if (el) el.textContent = "App version hm-v1.12.1. Last check " + t + ": " + text;
   }
 
   function pullSheet() {
@@ -5008,12 +5055,55 @@
     });
   }
 
+  var reportOmitIds = {};
+  var reportRangeKey = "";
+
+  function reportRangeChanged(start, end) {
+    var key = String(start || "") + "|" + String(end || "");
+    if (key !== reportRangeKey) {
+      reportRangeKey = key;
+      reportOmitIds = {};
+      return true;
+    }
+    return false;
+  }
+
+  function omitReportEntries(ids) {
+    (ids || []).forEach(function (id) {
+      if (id != null && id !== "") reportOmitIds[String(id)] = true;
+    });
+    renderReport();
+  }
+
+  function restoreReportEntry(id) {
+    delete reportOmitIds[String(id)];
+    renderReport();
+  }
+
+  function restoreReportAll() {
+    reportOmitIds = {};
+    renderReport();
+  }
+
+  function omitReportCategory(name) {
+    var start = document.getElementById("report-start").value;
+    var end = document.getElementById("report-end").value;
+    var full = spendingReport(entries, start, end);
+    var ids = [];
+    (full.entries || []).forEach(function (e) {
+      if ((e.category || "Uncategorized") === name) ids.push(e.id);
+    });
+    omitReportEntries(ids);
+  }
+
   function renderReport() {
     var start = document.getElementById("report-start").value;
     var end = document.getElementById("report-end").value;
+    var rangeChanged = reportRangeChanged(start, end);
     var err = document.getElementById("report-error");
     var label = document.getElementById("report-range-label");
-    var result = spendingReport(entries, start, end);
+    var omitLine = document.getElementById("report-omit-line");
+    var result = spendingReport(entries, start, end, reportOmitIds);
     err.textContent = result.ok ? "" : (result.error || "");
     if (!result.ok) {
       label.textContent = result.error || "Choose dates to see a report.";
@@ -5022,7 +5112,12 @@
       document.getElementById("report-legend").textContent = "";
       document.getElementById("report-cats-wrap").textContent = "";
       document.getElementById("report-entries-wrap-inner").textContent = "";
+      if (omitLine) { omitLine.hidden = true; omitLine.textContent = ""; }
       return;
+    }
+    if (rangeChanged) {
+      var details = document.getElementById("report-entries-wrap");
+      if (details) details.open = true;
     }
     label.textContent = formatEntryDate(result.start) + " through " + formatEntryDate(result.end);
     document.getElementById("report-total").textContent = formatUSD(result.total);
@@ -5037,23 +5132,43 @@
       li.appendChild(document.createTextNode(c.name + " · " + formatUSD(c.amountCents) + " (" + c.percent.toFixed(1) + "%)"));
       legend.appendChild(li);
     });
+    if (omitLine) {
+      var removedN = (result.omitted || []).length;
+      omitLine.hidden = removedN === 0;
+      omitLine.textContent = "";
+      if (removedN) {
+        omitLine.appendChild(document.createTextNode(removedN === 1 ? "1 item removed" : (removedN + " items removed")));
+        var restoreAll = document.createElement("button");
+        restoreAll.type = "button";
+        restoreAll.id = "report-restore-all";
+        restoreAll.textContent = "Restore all";
+        restoreAll.addEventListener("click", restoreReportAll);
+        omitLine.appendChild(restoreAll);
+      }
+    }
     var catsWrap = document.getElementById("report-cats-wrap");
     catsWrap.textContent = "";
     if (!result.categories.length) {
-      catsWrap.appendChild(el("p", "empty", "No spending in these dates."));
+      catsWrap.appendChild(el("p", "empty", result.omitted && result.omitted.length ? "All spending in these dates was taken off this report." : "No spending in these dates."));
     } else {
       var table = document.createElement("table");
       table.className = "report-table";
       table.id = "report-cats";
-      table.innerHTML = "<thead><tr><th>Category</th><th class=\"amt\">Amount</th><th class=\"amt\">Percent</th><th class=\"amt\">Entries</th></tr></thead>";
+      table.innerHTML = "<thead><tr><th>Category</th><th class=\"amt\">Amount</th><th class=\"amt\">Percent</th><th class=\"amt\">Entries</th><th class=\"no-print\"></th></tr></thead>";
       var tb = document.createElement("tbody");
       result.categories.forEach(function (c) {
         var tr = document.createElement("tr");
         tr.appendChild(el("td", "", c.name));
-        var a = el("td", "amt", formatUSD(c.amountCents));
-        var p = el("td", "amt", c.percent.toFixed(1) + "%");
-        var n = el("td", "amt", String(c.count));
-        tr.appendChild(a); tr.appendChild(p); tr.appendChild(n);
+        tr.appendChild(el("td", "amt", formatUSD(c.amountCents)));
+        tr.appendChild(el("td", "amt", c.percent.toFixed(1) + "%"));
+        tr.appendChild(el("td", "amt", String(c.count)));
+        var act = el("td", "no-print");
+        var btn = el("button", "report-omit-btn", "×");
+        btn.type = "button";
+        btn.setAttribute("aria-label", "Remove " + c.name + " from this report");
+        btn.addEventListener("click", function () { omitReportCategory(c.name); });
+        act.appendChild(btn);
+        tr.appendChild(act);
         tb.appendChild(tr);
       });
       table.appendChild(tb);
@@ -5061,21 +5176,44 @@
     }
     var entriesWrap = document.getElementById("report-entries-wrap-inner");
     entriesWrap.textContent = "";
-    if (!result.entries.length) {
+    var listed = (result.entries || []).concat(result.omitted || []);
+    listed.sort(function (a, b) {
+      return String(a.date).localeCompare(String(b.date)) || String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.id || "").localeCompare(String(b.id || ""));
+    });
+    if (!listed.length) {
       entriesWrap.appendChild(el("p", "empty", "No spending entries in these dates."));
     } else {
       var et = document.createElement("table");
       et.className = "report-table";
       et.id = "report-entries";
-      et.innerHTML = "<thead><tr><th>Date</th><th>Store</th><th>Category</th><th>Who</th><th class=\"amt\">Amount</th></tr></thead>";
+      et.innerHTML = "<thead><tr><th>Date</th><th>Store</th><th>Category</th><th>Who</th><th class=\"amt\">Amount</th><th class=\"no-print\"></th></tr></thead>";
       var eb = document.createElement("tbody");
-      result.entries.forEach(function (e) {
+      listed.forEach(function (e) {
+        var omitted = !!(reportOmitIds[String(e.id)]);
         var tr = document.createElement("tr");
+        if (omitted) tr.className = "report-omitted";
+        tr.dataset.id = e.id;
         tr.appendChild(el("td", "", formatEntryDate(e.date)));
         tr.appendChild(el("td", "", e.note || "—"));
         tr.appendChild(el("td", "", e.category || "Uncategorized"));
         tr.appendChild(el("td", "", e.who || "—"));
         tr.appendChild(el("td", "amt", formatUSD(e.amountCents)));
+        var act = el("td", "no-print");
+        var btn = document.createElement("button");
+        btn.type = "button";
+        if (omitted) {
+          btn.className = "report-omit-btn restore";
+          btn.textContent = "Restore";
+          btn.setAttribute("aria-label", "Put " + (e.note || e.category || "this item") + " back on this report");
+          btn.addEventListener("click", function () { restoreReportEntry(e.id); });
+        } else {
+          btn.className = "report-omit-btn";
+          btn.textContent = "×";
+          btn.setAttribute("aria-label", "Remove " + (e.note || e.category || "this item") + " from this report");
+          btn.addEventListener("click", function () { omitReportEntries([e.id]); });
+        }
+        act.appendChild(btn);
+        tr.appendChild(act);
         eb.appendChild(tr);
       });
       et.appendChild(eb);
@@ -5266,6 +5404,7 @@
     tripSpending: tripSpending,
     chosenTripOverride: chosenTripOverride,
     spendingReport: spendingReport,
+    normalizeOmitIds: normalizeOmitIds,
     pieSlicePath: pieSlicePath,
     reportPresetRange: reportPresetRange,
     monthEndYMD: monthEndYMD,
