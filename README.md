@@ -22,6 +22,7 @@ After the first online open, the page works offline. Income, spending, categorie
 - Add income for Mitch or Tonya. Add spending in a category. Add your own categories.
 - Take a receipt photo or pick one from the gallery. It is stored on the phone. Tap it to view it, then **Save photo** to put a copy in your files.
 - A receipt photo fills in the amount, store, and date. The category guess uses this phone's per-store memory first, then a small learner trained on all synced entries (both phones), the words read from past receipts on this phone, and corrections, then common store names. It only picks categories in your list and asks when unsure.
+- Report: pick dates (or this week, this month, last month, or a trip) to see spending totals, a category list from high to low, and a pie chart. Save / Print PDF opens the phone's print screen, where you can choose Save as PDF.
 - Trips: name a trip with start and end dates, and keep that spending in its own total and category list. It still counts in the week and month totals.
 - Delete one entry at a time. Deleting a category does not delete old entries.
 - Settings → **Export backup** / **Import backup**. Import matches entries by id and does not duplicate them.

@@ -294,6 +294,29 @@
     .due-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .due-actions .btn { margin-top: 8px; }
     .row-actions { display: flex; gap: 8px; }
+    .report-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+    .report-presets .btn { min-height: 44px; padding: 8px 12px; font-size: 0.95rem; }
+    .report-table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; }
+    .report-table th, .report-table td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .report-table th { font-size: 0.85rem; color: var(--muted); font-weight: 750; }
+    .report-table .amt { text-align: right; font-variant-numeric: tabular-nums; font-weight: 750; white-space: nowrap; }
+    .report-chart-wrap { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin: 12px 0 16px; }
+    #report-pie { width: 200px; height: 200px; max-width: 46vw; }
+    .report-legend { list-style: none; padding: 0; margin: 0; flex: 1; min-width: 160px; }
+    .report-legend li { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+    .report-swatch { width: 14px; height: 14px; border-radius: 4px; flex: 0 0 14px; }
+    .print-only { display: none; }
+    @media print {
+      .print-only { display: block !important; }
+      .no-print, .appbar, #report-print { display: none !important; }
+      body { background: #fff; color: #000; }
+      body.with-dock { padding-bottom: 0; }
+      .wrap { padding: 0; max-width: none; margin: 0; }
+      .panel { box-shadow: none; }
+      .report-chart-wrap, .report-table, #report-summary { break-inside: avoid; page-break-inside: avoid; }
+      #report-pie { width: 220px; height: 220px; max-width: none; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
   </style>
 </head>
 <body>
@@ -301,6 +324,7 @@
     <a class="brand" href="#/">Household Money</a>
     <nav aria-label="Sections">
       <a href="#/trips">Trips</a>
+      <a href="#/report">Report</a>
       <a href="#/reminders">Reminders</a>
       <a href="#/categories">Categories</a>
       <a href="#/settings">Settings</a>
@@ -540,6 +564,40 @@
       </form>
     </div>
 
+    <div id="view-report" hidden>
+      <a class="back no-print" href="#/">Back</a>
+      <h2 class="no-print">Report</h2>
+      <p class="sub no-print">Pick a start and end date to see spending, totals by category from high to low, and a pie chart. Income and savings are left out. Trip spending in these dates is included. On a phone, tap Save / Print PDF and choose Save as PDF as the printer.</p>
+      <div id="report-form" class="no-print">
+        <label class="field" for="report-start">Start date</label>
+        <input id="report-start" name="start" type="date" required>
+        <label class="field" for="report-end">End date</label>
+        <input id="report-end" name="end" type="date" required>
+        <div class="report-presets" id="report-presets"></div>
+        <p class="error" id="report-error" role="alert"></p>
+      </div>
+      <div id="report-output">
+        <h1 class="print-only" id="report-print-title">Household Money spending report</h1>
+        <p class="sub" id="report-range-label">Choose dates to see a report.</p>
+        <div class="panel" id="report-summary">
+          <div class="stats">
+            <div class="stat"><div class="label">Total spent</div><div class="num out" id="report-total">$0.00</div></div>
+          </div>
+        </div>
+        <div id="report-chart-wrap" class="report-chart-wrap">
+          <svg id="report-pie" viewBox="0 0 200 200" role="img" aria-label="Spending by category"></svg>
+          <ul id="report-legend" class="report-legend"></ul>
+        </div>
+        <h3>By category</h3>
+        <div id="report-cats-wrap"></div>
+        <details id="report-entries-wrap">
+          <summary>Entries</summary>
+          <div id="report-entries-wrap-inner"></div>
+        </details>
+      </div>
+      <button class="btn btn-primary btn-block no-print" id="report-print" type="button">Save / Print PDF</button>
+    </div>
+
     <div id="view-categories" hidden>
       <a class="back" href="#/">Back</a>
       <h2>Categories</h2>
@@ -662,6 +720,7 @@
       <p>Savings you put aside or take out is saved the same way and is not counted as spending. What is left after income, spending, and savings carries to the next month, even if it is negative.</p>
       <p>Bill reminders are shared the same way. A reminder is not spending until you tap Approve, and you can change the date first.</p>
       <p>Trips you add stay on this phone for now, because the shared sheet cannot store trip names yet. Spending both of you save still shows on a trip if its date falls during that trip, unless you mark it No trip on this phone. Trip spending still counts in the week and month totals.</p>
+      <p>The Report section can print or save a PDF of spending between two dates, with totals by category and a pie chart. It uses spending from both phones that is already in this app. Income and savings are left out.</p>
       <button class="btn btn-primary btn-block" id="export-backup" type="button">Export backup</button>
       <label class="btn btn-block" for="import-file" style="display:flex;align-items:center;justify-content:center;margin-top:8px;">Import backup</label>
       <input class="file-input" id="import-file" type="file" accept="application/json,.json" aria-label="Import backup file">
@@ -894,6 +953,77 @@
     if (!selected || selected === "none") return auto ? "none" : "";
     if (auto && selected === auto.id) return "";
     return findTrip(selected, list) ? selected : "";
+  }
+
+
+  var REPORT_COLORS = ["#0f6b4c", "#8d2f28", "#e6b325", "#1f6f8b", "#6b4c9a", "#c45c26", "#2e7d4f", "#5c6b7a", "#b5477a", "#3d5a80"];
+
+  function monthEndYMD(ymd) {
+    var p = String(ymd || "").split("-");
+    if (p.length < 2) return "";
+    return todayYMD(new Date(Number(p[0]), Number(p[1]), 0));
+  }
+
+  function previousMonthStartYMD(now) {
+    var d = now || new Date();
+    var y = d.getFullYear();
+    var m = d.getMonth();
+    if (m === 0) { y -= 1; m = 12; }
+    return y + "-" + pad(m) + "-01";
+  }
+
+  function pieSlicePath(cx, cy, r, startAngle, endAngle) {
+    function pt(a) {
+      return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+    }
+    var a0 = startAngle - Math.PI / 2;
+    var a1 = endAngle - Math.PI / 2;
+    var p0 = pt(a0);
+    var p1 = pt(a1);
+    var large = (endAngle - startAngle) > Math.PI ? 1 : 0;
+    return "M " + cx + " " + cy + " L " + p0[0].toFixed(3) + " " + p0[1].toFixed(3) + " A " + r + " " + r + " 0 " + large + " 1 " + p1[0].toFixed(3) + " " + p1[1].toFixed(3) + " Z";
+  }
+
+  function spendingReport(list, startYMD, endYMD) {
+    if (!isYMD(startYMD) || !isYMD(endYMD)) {
+      return { ok: false, error: "Choose a start date and an end date.", total: 0, categories: [], entries: [] };
+    }
+    if (endYMD < startYMD) {
+      return { ok: false, error: "The end date has to be on or after the start date.", total: 0, categories: [], entries: [] };
+    }
+    var items = [];
+    (list || []).forEach(function (e) {
+      if (!e || e.type !== "spending") return;
+      if (typeof e.date !== "string" || e.date < startYMD || e.date > endYMD) return;
+      var cents = Math.round(Number(e.amountCents) || 0);
+      if (cents <= 0) return;
+      items.push(e);
+    });
+    items.sort(function (a, b) {
+      return String(a.date).localeCompare(String(b.date)) || String(a.createdAt || "").localeCompare(String(b.createdAt || "")) || String(a.id || "").localeCompare(String(b.id || ""));
+    });
+    var total = 0;
+    var byCat = {};
+    items.forEach(function (e) {
+      var cents = Math.round(Number(e.amountCents) || 0);
+      total += cents;
+      var name = e.category || "Uncategorized";
+      if (!byCat[name]) byCat[name] = { name: name, amountCents: 0, count: 0 };
+      byCat[name].amountCents += cents;
+      byCat[name].count += 1;
+    });
+    var categories = Object.keys(byCat).map(function (k) { return byCat[k]; }).sort(function (a, b) {
+      return b.amountCents - a.amountCents || a.name.localeCompare(b.name);
+    }).map(function (c, i) {
+      return {
+        name: c.name,
+        amountCents: c.amountCents,
+        count: c.count,
+        percent: total ? Math.round((c.amountCents * 1000) / total) / 10 : 0,
+        color: REPORT_COLORS[i % REPORT_COLORS.length]
+      };
+    });
+    return { ok: true, start: startYMD, end: endYMD, total: total, categories: categories, entries: items };
   }
 
 
@@ -2994,7 +3124,7 @@
     var el = document.getElementById("sync-diag");
     var d = new Date();
     var t = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
-    if (el) el.textContent = "App version hm-v1.11.6. Last check " + t + ": " + text;
+    if (el) el.textContent = "App version hm-v1.12.0. Last check " + t + ": " + text;
   }
 
   function pullSheet() {
@@ -3325,7 +3455,7 @@
   }
 
   function showView(name, focusHeading) {
-    ["home", "income", "spend", "savings", "trips", "trip", "trip-form", "categories", "reminders", "approve", "settings"].forEach(function (view) {
+    ["home", "income", "spend", "savings", "trips", "trip", "trip-form", "report", "categories", "reminders", "approve", "settings"].forEach(function (view) {
       document.getElementById("view-" + view).hidden = view !== name;
     });
     document.body.classList.toggle("with-dock", name === "home");
@@ -3342,6 +3472,7 @@
     if (name === "trips") renderTripList();
     if (name === "trip") renderTripDetail();
     if (name === "trip-form") openTripForm();
+    if (name === "report") openReport();
     if (name === "categories") renderCategories();
     if (name === "reminders") openReminders();
     if (name === "approve") openApprove();
@@ -3366,6 +3497,7 @@
     else if (h.indexOf("#/spend") === 0) name = "spend";
     else if (h.indexOf("#/savings") === 0) name = "savings";
     else if (h.indexOf("#/trips") === 0) name = tripRouteView();
+    else if (h.indexOf("#/report") === 0) name = "report";
     else if (h.indexOf("#/approve") === 0) name = "approve";
     else if (h.indexOf("#/reminders") === 0) name = "reminders";
     else if (h.indexOf("#/categories") === 0) name = "categories";
@@ -4800,6 +4932,183 @@
     location.hash = "#/trips";
   }
 
+
+  function reportPresetRange(kind, now) {
+    var d = now || new Date();
+    var today = todayYMD(d);
+    if (kind === "week") {
+      var ws = weekStartYMD(d);
+      return { start: ws, end: addDaysYMD(ws, 6) };
+    }
+    if (kind === "month") {
+      var ms = monthStartYMD(d);
+      return { start: ms, end: monthEndYMD(ms) };
+    }
+    if (kind === "last-month") {
+      var first = previousMonthStartYMD(d);
+      return { start: first, end: monthEndYMD(first) };
+    }
+    return null;
+  }
+
+  function applyReportDates(start, end) {
+    document.getElementById("report-start").value = start;
+    document.getElementById("report-end").value = end;
+    renderReport();
+  }
+
+  function renderReportPresets() {
+    var box = document.getElementById("report-presets");
+    if (!box) return;
+    box.textContent = "";
+    function addBtn(label, start, end) {
+      var btn = el("button", "btn", label);
+      btn.type = "button";
+      btn.addEventListener("click", function () { applyReportDates(start, end); });
+      box.appendChild(btn);
+    }
+    var week = reportPresetRange("week");
+    var month = reportPresetRange("month");
+    var last = reportPresetRange("last-month");
+    addBtn("This week", week.start, week.end);
+    addBtn("This month", month.start, month.end);
+    addBtn("Last month", last.start, last.end);
+    trips.slice().sort(function (a, b) {
+      return String(b.start).localeCompare(String(a.start)) || a.name.localeCompare(b.name);
+    }).forEach(function (t) {
+      addBtn(t.name, t.start, t.end);
+    });
+  }
+
+  function renderReportPie(svg, categories) {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    if (!categories || !categories.length) return;
+    var total = 0;
+    categories.forEach(function (c) { total += c.amountCents; });
+    if (!total) return;
+    var ns = "http://www.w3.org/2000/svg";
+    if (categories.length === 1 || categories[0].amountCents === total) {
+      var circle = document.createElementNS(ns, "circle");
+      circle.setAttribute("cx", "100");
+      circle.setAttribute("cy", "100");
+      circle.setAttribute("r", "90");
+      circle.setAttribute("fill", categories[0].color);
+      svg.appendChild(circle);
+      return;
+    }
+    var angle = 0;
+    categories.forEach(function (cat) {
+      var sweep = (cat.amountCents / total) * 2 * Math.PI;
+      if (sweep <= 0) return;
+      var path = document.createElementNS(ns, "path");
+      path.setAttribute("d", pieSlicePath(100, 100, 90, angle, angle + sweep));
+      path.setAttribute("fill", cat.color);
+      svg.appendChild(path);
+      angle += sweep;
+    });
+  }
+
+  function renderReport() {
+    var start = document.getElementById("report-start").value;
+    var end = document.getElementById("report-end").value;
+    var err = document.getElementById("report-error");
+    var label = document.getElementById("report-range-label");
+    var result = spendingReport(entries, start, end);
+    err.textContent = result.ok ? "" : (result.error || "");
+    if (!result.ok) {
+      label.textContent = result.error || "Choose dates to see a report.";
+      document.getElementById("report-total").textContent = formatUSD(0);
+      renderReportPie(document.getElementById("report-pie"), []);
+      document.getElementById("report-legend").textContent = "";
+      document.getElementById("report-cats-wrap").textContent = "";
+      document.getElementById("report-entries-wrap-inner").textContent = "";
+      return;
+    }
+    label.textContent = formatEntryDate(result.start) + " through " + formatEntryDate(result.end);
+    document.getElementById("report-total").textContent = formatUSD(result.total);
+    renderReportPie(document.getElementById("report-pie"), result.categories);
+    var legend = document.getElementById("report-legend");
+    legend.textContent = "";
+    result.categories.forEach(function (c) {
+      var li = document.createElement("li");
+      var sw = el("span", "report-swatch");
+      sw.style.background = c.color;
+      li.appendChild(sw);
+      li.appendChild(document.createTextNode(c.name + " · " + formatUSD(c.amountCents) + " (" + c.percent.toFixed(1) + "%)"));
+      legend.appendChild(li);
+    });
+    var catsWrap = document.getElementById("report-cats-wrap");
+    catsWrap.textContent = "";
+    if (!result.categories.length) {
+      catsWrap.appendChild(el("p", "empty", "No spending in these dates."));
+    } else {
+      var table = document.createElement("table");
+      table.className = "report-table";
+      table.id = "report-cats";
+      table.innerHTML = "<thead><tr><th>Category</th><th class=\"amt\">Amount</th><th class=\"amt\">Percent</th><th class=\"amt\">Entries</th></tr></thead>";
+      var tb = document.createElement("tbody");
+      result.categories.forEach(function (c) {
+        var tr = document.createElement("tr");
+        tr.appendChild(el("td", "", c.name));
+        var a = el("td", "amt", formatUSD(c.amountCents));
+        var p = el("td", "amt", c.percent.toFixed(1) + "%");
+        var n = el("td", "amt", String(c.count));
+        tr.appendChild(a); tr.appendChild(p); tr.appendChild(n);
+        tb.appendChild(tr);
+      });
+      table.appendChild(tb);
+      catsWrap.appendChild(table);
+    }
+    var entriesWrap = document.getElementById("report-entries-wrap-inner");
+    entriesWrap.textContent = "";
+    if (!result.entries.length) {
+      entriesWrap.appendChild(el("p", "empty", "No spending entries in these dates."));
+    } else {
+      var et = document.createElement("table");
+      et.className = "report-table";
+      et.id = "report-entries";
+      et.innerHTML = "<thead><tr><th>Date</th><th>Store</th><th>Category</th><th>Who</th><th class=\"amt\">Amount</th></tr></thead>";
+      var eb = document.createElement("tbody");
+      result.entries.forEach(function (e) {
+        var tr = document.createElement("tr");
+        tr.appendChild(el("td", "", formatEntryDate(e.date)));
+        tr.appendChild(el("td", "", e.note || "—"));
+        tr.appendChild(el("td", "", e.category || "Uncategorized"));
+        tr.appendChild(el("td", "", e.who || "—"));
+        tr.appendChild(el("td", "amt", formatUSD(e.amountCents)));
+        eb.appendChild(tr);
+      });
+      et.appendChild(eb);
+      entriesWrap.appendChild(et);
+    }
+  }
+
+  function openReport() {
+    renderReportPresets();
+    var start = document.getElementById("report-start");
+    var end = document.getElementById("report-end");
+    if (!start.value || !end.value) {
+      var month = reportPresetRange("month");
+      var today = todayYMD();
+      start.value = month.start;
+      end.value = today < month.end ? today : month.end;
+    }
+    renderReport();
+  }
+
+  function onReportPrint() {
+    var start = document.getElementById("report-start").value;
+    var end = document.getElementById("report-end").value;
+    var result = spendingReport(entries, start, end);
+    var err = document.getElementById("report-error");
+    if (!result.ok) {
+      err.textContent = result.error || "Choose dates first.";
+      return;
+    }
+    err.textContent = "";
+    window.print();
+  }
+
   function bind() {
     document.getElementById("week-prev").addEventListener("click", function () { weekOffset -= 1; renderHome(); });
     document.getElementById("week-next").addEventListener("click", function () { weekOffset += 1; renderHome(); });
@@ -4814,6 +5123,9 @@
     });
     document.getElementById("spend-remind").addEventListener("change", syncSpendRemindFields);
     document.getElementById("trip-form").addEventListener("submit", onTripSubmit);
+    document.getElementById("report-start").addEventListener("change", renderReport);
+    document.getElementById("report-end").addEventListener("change", renderReport);
+    document.getElementById("report-print").addEventListener("click", onReportPrint);
     document.getElementById("trip-delete").addEventListener("click", function () {
       var id = tripRouteParts().id;
       if (id) deleteTrip(id);
@@ -4953,6 +5265,12 @@
     entryBelongsToTrip: entryBelongsToTrip,
     tripSpending: tripSpending,
     chosenTripOverride: chosenTripOverride,
+    spendingReport: spendingReport,
+    pieSlicePath: pieSlicePath,
+    reportPresetRange: reportPresetRange,
+    monthEndYMD: monthEndYMD,
+    previousMonthStartYMD: previousMonthStartYMD,
+    REPORT_COLORS: REPORT_COLORS,
     reminderOccurrences: reminderOccurrences,
     ordinalDay: ordinalDay,
     mergePulledReminders: mergePulledReminders,

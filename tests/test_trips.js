@@ -1,4 +1,4 @@
-// hm-v1.11.6: trip date-range rule, explicit No trip, totals, weekly/monthly unchanged. Pure Node, no browser.
+// hm-v1.12.0: trip date-range rule, explicit No trip, totals, weekly/monthly unchanged. Pure Node, no browser.
 const fs = require("fs"), vm = require("vm"), assert = require("assert");
 const html = fs.readFileSync(__dirname + "/../index.html", "utf8");
 function grab(name) {
@@ -90,5 +90,5 @@ assert(html.includes('href="#/trips"'));
 assert(html.includes("function loadTrips"));
 assert(!/entrySyncPayload[\s\S]{0,400}tripOverride/.test(html), "sync payload must not send tripOverride");
 const sw = fs.readFileSync(__dirname + "/../sw.js", "utf8");
-assert(sw.includes('VERSION = "hm-v1.11.6"') && html.includes("App version hm-v1.11.6"));
+assert(sw.includes('VERSION = "hm-v1.12.0"') && html.includes("App version hm-v1.12.0"));
 console.log("trip tests: OK");

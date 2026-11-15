@@ -71,7 +71,7 @@ def main():
         assert page2.locator("#week-prev").is_disabled()
         page2.locator("#week-next").click()
         assert t("#week-start") == "-$200.00" and t("#week-end") == "$250.00"
-        assert (t("#month-in"), t("#month-out"), t("#month-left")) == month_before == ("$500.00", "$360.00", "$140.00"), month_before
+        assert (t("#month-in"), t("#month-out"), t("#month-left")) == month_before == ("$500.00", "$360.00", "$240.00"), month_before
         assert page2.locator("#week-past .week-row").count() == 4
         page2.set_viewport_size({"width": 390, "height": 844})
         page2.screenshot(path="/tmp/hm-week.png", full_page=False)

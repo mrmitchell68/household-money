@@ -1,4 +1,4 @@
-// hm-v1.11.6: monthly rollover math + This month panel wiring. Pure Node, no browser.
+// hm-v1.12.0: monthly rollover math + This month panel wiring. Pure Node, no browser.
 const fs = require("fs"), vm = require("vm"), assert = require("assert");
 const html = fs.readFileSync(__dirname + "/../index.html", "utf8");
 function grab(name) {
@@ -32,5 +32,5 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(L.map(w=>[w.start,w.startBalanc
 for (const id of ["month-start","month-in","month-out","month-saved","month-left","carried-in","left-rolls","week-start"]) assert(html.includes('id="'+id+'"'), id);
 for (const s of ['setSigned("month-start", roll.carriedIn)','setSigned("month-saved", roll.savedThisMonth)','setSigned("month-left", roll.leftNow)']) assert(html.includes(s), s);
 assert(html.indexOf('setSigned("month-left"') > html.indexOf('setMoney("month"'));
-assert(fs.readFileSync(__dirname+"/../sw.js","utf8").includes('VERSION = "hm-v1.11.6"') && html.includes("App version hm-v1.11.6"));
+assert(fs.readFileSync(__dirname+"/../sw.js","utf8").includes('VERSION = "hm-v1.12.0"') && html.includes("App version hm-v1.12.0"));
 console.log("month rollover tests: OK");
